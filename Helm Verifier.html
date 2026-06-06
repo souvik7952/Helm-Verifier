@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Helm Verifier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  DESIGN TOKENS — DARK (default)                          ║
+   ╚══════════════════════════════════════════════════════════╝ */
+:root {
+  --bg:           #070809;
+  --bg2:          #0c0e12;
+  --surface:      #0f1117;
+  --surface2:     #141720;
+  --surface3:     #1a1e2a;
+  --surface4:     #212637;
+  --border:       #1c2030;
+  --border2:      #262d42;
+  --border3:      #313a54;
+
+  --text:         #dde3f0;
+  --text2:        #7e8ba8;
+  --text3:        #414e6a;
+  --text4:        #293044;
+
+  --green:        #1de9a2;
+  --green-dim:    rgba(29,233,162,.08);
+  --green-glow:   rgba(29,233,162,.18);
+  --yellow:       #f5c842;
+  --yellow-dim:   rgba(245,200,66,.08);
+  --red:          #f0545a;
+  --red-dim:      rgba(240,84,90,.08);
+  --blue:         #4b9eff;
+  --blue-dim:     rgba(75,158,255,.08);
+  --blue-glow:    rgba(75,158,255,.15);
+
+  --accent:       #4f7cff;
+  --accent2:      #7c52ff;
+  --accent-glow:  rgba(79,124,255,.20);
+
+  /* YAML token colors — dark */
+  --yaml-key:     #6fa3ff;
+  --yaml-string:  #9ec8ff;
+  --yaml-number:  #f0a84a;
+  --yaml-bool:    #2ed8a0;
+  --yaml-comment: #3d4d6a;
+  --yaml-helm:    #c98bff;
+
+  --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --sans: 'Geist', system-ui, sans-serif;
+
+  --radius:    10px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+
+  --toolbar-h: 58px;
+  --console-h: 172px;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.4);
+  --shadow:    0 4px 16px rgba(0,0,0,.5);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.6);
+
+  --transition: .16s cubic-bezier(.4,0,.2,1);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  LIGHT THEME                                             ║
+   ╚══════════════════════════════════════════════════════════╝ */
+[data-theme="light"] {
+  --bg:           #eef0f6;
+  --bg2:          #e7eaf3;
+  --surface:      #ffffff;
+  --surface2:     #f4f5fa;
+  --surface3:     #eceef6;
+  --surface4:     #e3e6f0;
+  --border:       #dde0ec;
+  --border2:      #cbd0e2;
+  --border3:      #b8bed4;
+
+  --text:         #16192b;
+  --text2:        #454e6e;
+  --text3:        #8a93b0;
+  --text4:        #c0c5d8;
+
+  --green:        #00b87a;
+  --green-dim:    rgba(0,184,122,.07);
+  --green-glow:   rgba(0,184,122,.12);
+  --yellow:       #b08000;
+  --yellow-dim:   rgba(176,128,0,.07);
+  --red:          #c93b40;
+  --red-dim:      rgba(201,59,64,.07);
+  --blue:         #2060d0;
+  --blue-dim:     rgba(32,96,208,.07);
+  --blue-glow:    rgba(32,96,208,.12);
+
+  --accent:       #3658e0;
+  --accent2:      #6035d0;
+  --accent-glow:  rgba(54,88,224,.14);
+
+  --yaml-key:     #1a45c8;
+  --yaml-string:  #0d68a0;
+  --yaml-number:  #9a4200;
+  --yaml-bool:    #006e48;
+  --yaml-comment: #8892b0;
+  --yaml-helm:    #7020a8;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+  --shadow:    0 4px 16px rgba(0,0,0,.10);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.14);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  RESET & BASE                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  TOOLBAR                                                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  height: var(--toolbar-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* subtle bottom shadow to lift it */
+  box-shadow: 0 1px 0 var(--border), var(--shadow-sm);
+}
+
+/* Brand */
+.toolbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+.brand-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 2px 8px var(--accent-glow);
+  flex-shrink: 0;
+}
+.brand-icon svg {
+  width: 14px; height: 14px;
+  fill: none;
+  stroke: rgba(255,255,255,.95);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.brand-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -.01em;
+}
+.brand-version {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: .04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface3);
+  border: 1px solid var(--border2);
+}
+
+/* Divider */
+.t-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border2);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* Generic toolbar button */
+.t-btn {
+  height: 32px;
+  padding: 0 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--text2);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -.01em;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition),
+              border-color var(--transition), box-shadow var(--transition),
+              transform var(--transition);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  outline: none;
+}
+.t-btn:hover {
+  background: var(--surface3);
+  color: var(--text);
+  border-color: var(--border3);
+}
+.t-btn:active { transform: scale(.97); }
+
+/* Icon-only button */
+.t-btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--text2);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition),
+              border-color var(--transition), transform var(--transition);
+  flex-shrink: 0;
+  outline: none;
+}
+.t-btn-icon:hover {
+  background: var(--surface3);
+  color: var(--text);
+  border-color: var(--border3);
+}
+.t-btn-icon:active { transform: scale(.94); }
+.t-btn-icon svg {
+  width: 14px; height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Primary render button */
+#renderBtn {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 0 0 0 var(--accent-glow);
+  transition: opacity var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+#renderBtn:hover {
+  opacity: .92;
+  box-shadow: 0 0 0 4px var(--accent-glow);
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  border-color: transparent;
+}
+#renderBtn svg { stroke: rgba(255,255,255,.9); }
+
+/* Verify button */
+#verifyBtn { color: var(--blue); }
+#verifyBtn:hover {
+  background: var(--blue-dim);
+  border-color: var(--blue);
+  color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-glow);
+}
+
+/* Status badge */
+.status-container { margin-left: auto; flex-shrink: 0; }
+.status {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  transition: all var(--transition);
+}
+.status::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status.valid {
+  color: var(--green);
+  background: var(--green-dim);
+  border-color: rgba(29,233,162,.2);
+}
+.status.valid::before {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse-green 2.4s ease-in-out infinite;
+}
+.status.warning {
+  color: var(--yellow);
+  background: var(--yellow-dim);
+  border-color: rgba(245,200,66,.2);
+}
+.status.warning::before { background: var(--yellow); }
+.status.error {
+  color: var(--red);
+  background: var(--red-dim);
+  border-color: rgba(240,84,90,.2);
+}
+.status.error::before { background: var(--red); }
+
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 4px var(--green); opacity: 1; }
+  50%       { box-shadow: 0 0 10px var(--green); opacity: .6; }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  APP SHELL                                               ║
+   ╚══════════════════════════════════════════════════════════╝ */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--toolbar-h));
+}
+
+/* Three-column editor grid */
+.main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  min-height: 0;
+  overflow: hidden;
+  /* Gap via pseudo-border approach for theme consistency */
+  background: var(--border);
+  gap: 1px;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  PANELS                                                  ║
+   ╚══════════════════════════════════════════════════════════╝ */
+.panel {
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.panel-header {
+  height: 40px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.panel-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.panel:nth-child(1) .panel-dot { background: var(--accent);  box-shadow: 0 0 6px var(--accent-glow); }
+.panel:nth-child(2) .panel-dot { background: var(--blue);    box-shadow: 0 0 6px var(--blue-glow); }
+.panel:nth-child(3) .panel-dot { background: var(--green);   box-shadow: 0 0 6px var(--green-glow); }
+
+.panel-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text2);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.panel-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface4);
+  color: var(--text3);
+  border: 1px solid var(--border2);
+  margin-left: auto;
+  letter-spacing: .03em;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  EDITOR (textarea + highlight backdrop)                  ║
+   ╚══════════════════════════════════════════════════════════╝ */
+.editor-wrapper {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.editor {
+  display: flex;
+  height: 100%;
+}
+
+/* Line numbers column */
+.line-numbers {
+  width: 50px;
+  min-width: 50px;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  color: var(--text4);
+  text-align: right;
+  padding: 15px 10px 15px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow: hidden;
+  user-select: none;
+  letter-spacing: 0;
+  transition: color var(--transition);
+}
+
+/* Code area: backdrop + textarea stacked */
+.code-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Syntax-highlighted backdrop */
+.highlight-backdrop {
+  position: absolute;
+  inset: 0;
+  padding: 15px 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+  background: transparent;
+  color: transparent;
+  border: none;
+  margin: 0;
+  tab-size: 2;
+}
+.highlight-backdrop::-webkit-scrollbar { display: none; }
+.highlight-backdrop { scrollbar-width: none; }
+
+/* The real textarea — sits on top, transparent */
+textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--accent);
+  border: none;
+  resize: none;
+  outline: none;
+  padding: 15px 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  z-index: 1;
+  tab-size: 2;
+}
+textarea::selection { background: rgba(79,124,255,.22); }
+textarea::-webkit-scrollbar { width: 6px; height: 6px; }
+textarea::-webkit-scrollbar-track { background: transparent; }
+textarea::-webkit-scrollbar-thumb {
+  background: var(--border3);
+  border-radius: 99px;
+}
+textarea::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* YAML token classes */
+.yaml-key     { color: var(--yaml-key); }
+.yaml-string  { color: var(--yaml-string); }
+.yaml-number  { color: var(--yaml-number); }
+.yaml-bool    { color: var(--yaml-bool); }
+.yaml-comment { color: var(--yaml-comment); font-style: italic; }
+.yaml-helm    { color: var(--yaml-helm); font-style: normal; }
+.yaml-plain   { color: var(--text); }
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  OUTPUT PANEL                                            ║
+   ╚══════════════════════════════════════════════════════════╝ */
+.output {
+  flex: 1;
+  overflow: auto;
+  padding: 15px 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  line-height: 1.65;
+  color: var(--text2);
+}
+.output::-webkit-scrollbar { width: 6px; }
+.output::-webkit-scrollbar-track { background: transparent; }
+.output::-webkit-scrollbar-thumb {
+  background: var(--border3);
+  border-radius: 99px;
+}
+.output::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* Empty state for output */
+.output:empty::before {
+  content: '— run Render to see output —';
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text4);
+  letter-spacing: .04em;
+  margin-top: 4px;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  CONSOLE                                                 ║
+   ╚══════════════════════════════════════════════════════════╝ */
+.console {
+  height: var(--console-h);
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.console-header {
+  height: 34px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.console-led {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text4);
+  flex-shrink: 0;
+  transition: background var(--transition), box-shadow var(--transition);
+}
+.console-led.active {
+  background: var(--green);
+  box-shadow: 0 0 5px var(--green);
+}
+
+.console-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text3);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.console-count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: .06em;
+}
+
+.console-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.console-body::-webkit-scrollbar { width: 4px; }
+.console-body::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 99px;
+}
+
+/* Console messages */
+.msg {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 5px 11px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  line-height: 1.5;
+  border: 1px solid transparent;
+  transition: background var(--transition);
+}
+.msg-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.success {
+  background: var(--green-dim);
+  color: var(--green);
+  border-color: rgba(29,233,162,.12);
+}
+.success .msg-badge {
+  background: rgba(29,233,162,.16);
+  color: var(--green);
+}
+.warning {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+  border-color: rgba(245,200,66,.12);
+}
+.warning .msg-badge {
+  background: rgba(245,200,66,.16);
+  color: var(--yellow);
+}
+.error {
+  background: var(--red-dim);
+  color: var(--red);
+  border-color: rgba(240,84,90,.12);
+}
+.error .msg-badge {
+  background: rgba(240,84,90,.16);
+  color: var(--red);
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  TOAST                                                   ║
+   ╚══════════════════════════════════════════════════════════╝ */
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 22px;
+  background: var(--surface3);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  padding: 9px 15px;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity .22s ease, transform .22s ease;
+  pointer-events: none;
+  box-shadow: var(--shadow-lg);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+}
+.toast::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  RESPONSIVE                                              ║
+   ╚══════════════════════════════════════════════════════════╝ */
+@media (max-width: 1100px) {
+  .main { grid-template-columns: 1fr 1fr; }
+  .panel:last-child { grid-column: span 2; }
+}
+
+@media (max-width: 700px) {
+  :root { --toolbar-h: 96px; --console-h: 140px; }
+  .main { grid-template-columns: 1fr; }
+  .panel:last-child { grid-column: auto; }
+  .toolbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 6px; }
+  .toolbar-brand { order: -1; width: 100%; }
+  .t-divider { display: none; }
+  .status-container { margin-left: auto; }
+  .app { height: calc(100vh - var(--toolbar-h)); }
+  .brand-version { display: none; }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  THEME TRANSITION                                        ║
+   ╚══════════════════════════════════════════════════════════╝ */
+html { transition: background var(--transition); }
+
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOOLBAR
+     ═══════════════════════════════════════════════════════════ -->
+<div class="toolbar">
+
+  <div class="toolbar-brand">
+    <div class="brand-icon">
+      <svg viewBox="0 0 16 16">
+        <polyline points="3,12 3,4 8,1 13,4 13,12"/>
+        <line x1="3" y1="8" x2="13" y2="8"/>
+        <line x1="6" y1="4" x2="6" y2="12"/>
+        <line x1="10" y1="4" x2="10" y2="12"/>
+      </svg>
+    </div>
+    <span class="brand-name">Helm Verifier</span>
+    <span class="brand-version">v2</span>
+  </div>
+
+  <div class="t-divider"></div>
+
+  <!-- Primary actions -->
+  <button id="renderBtn" class="t-btn">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="3,2 14,8 3,14"/>
+    </svg>
+    Render
+  </button>
+
+  <button id="verifyBtn" class="t-btn">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="2,8 6,12 14,4"/>
+    </svg>
+    Verify
+  </button>
+
+  <div class="t-divider"></div>
+
+  <!-- Secondary actions -->
+  <button id="clearBtn" class="t-btn">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>
+    </svg>
+    Clear
+  </button>
+
+  <button id="copyBtn" class="t-btn-icon" title="Copy output">
+    <svg viewBox="0 0 16 16">
+      <rect x="5" y="5" width="9" height="10" rx="1.5"/>
+      <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v7A1.5 1.5 0 0 0 3.5 12H5"/>
+    </svg>
+  </button>
+
+  <button id="downloadBtn" class="t-btn-icon" title="Download output">
+    <svg viewBox="0 0 16 16">
+      <line x1="8" y1="2" x2="8" y2="11"/>
+      <polyline points="4,8 8,12 12,8"/>
+      <line x1="2" y1="14" x2="14" y2="14"/>
+    </svg>
+  </button>
+
+  <div class="t-divider"></div>
+
+  <!-- Theme toggle -->
+  <button id="themeBtn" class="t-btn-icon" title="Toggle dark / light mode">
+    <svg viewBox="0 0 16 16" id="themeSvg">
+      <!-- Moon icon (shown in dark mode) -->
+      <path d="M13.5 10.5A6 6 0 0 1 5.5 2.5a6 6 0 1 0 8 8z"/>
+    </svg>
+  </button>
+
+  <div class="status-container">
+    <div id="statusBadge" class="status valid">VALID</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     APP BODY
+     ═══════════════════════════════════════════════════════════ -->
+<div class="app">
+  <div class="main">
+
+    <!-- ── Template panel ──────────────────────────────────── -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-dot"></div>
+        <span class="panel-label">Template</span>
+        <span class="panel-tag">.yaml / helm</span>
+      </div>
+      <div class="editor-wrapper">
+        <div class="editor">
+          <div class="line-numbers" id="templateLines">1</div>
+          <div class="code-area">
+            <div class="highlight-backdrop" id="templateBackdrop"></div>
+            <textarea id="templateEditor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Values panel ────────────────────────────────────── -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-dot"></div>
+        <span class="panel-label">Values</span>
+        <span class="panel-tag">.yaml</span>
+      </div>
+      <div class="editor-wrapper">
+        <div class="editor">
+          <div class="line-numbers" id="valuesLines">1</div>
+          <div class="code-area">
+            <div class="highlight-backdrop" id="valuesBackdrop"></div>
+            <textarea id="valuesEditor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Output panel ────────────────────────────────────── -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-dot"></div>
+        <span class="panel-label">Output</span>
+        <span class="panel-tag">rendered</span>
+      </div>
+      <div class="output" id="output"></div>
+    </div>
+
+  </div>
+
+  <!-- ── Validation Console ─────────────────────────────────── -->
+  <div class="console">
+    <div class="console-header">
+      <div class="console-led" id="consoleLed"></div>
+      <span class="console-title">Validation Console</span>
+      <span class="console-count" id="consoleCount"></span>
+    </div>
+    <div class="console-body" id="console"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     LOGIC  (100% preserved from v2, zero changes)
+     ═══════════════════════════════════════════════════════════ -->
+<script>
+const templateEditor   = document.getElementById('templateEditor');
+const valuesEditor     = document.getElementById('valuesEditor');
+const templateBackdrop = document.getElementById('templateBackdrop');
+const valuesBackdrop   = document.getElementById('valuesBackdrop');
+const output           = document.getElementById('output');
+const consoleBody      = document.getElementById('console');
+const statusBadge      = document.getElementById('statusBadge');
+
+let warnings = [];
+let errors   = [];
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+function toast(message) {
+  const t = document.getElementById('toast');
+  t.textContent = message;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+/* ── Theme toggle ───────────────────────────────────────────────────────── */
+(function () {
+  const btn = document.getElementById('themeBtn');
+  const svg = document.getElementById('themeSvg');
+  let dark = true;
+
+  const moonPath = '<path d="M13.5 10.5A6 6 0 0 1 5.5 2.5a6 6 0 1 0 8 8z"/>';
+  const sunPath  = '<circle cx="8" cy="8" r="3.5"/>' +
+    '<line x1="8" y1="1" x2="8" y2="3"/><line x1="8" y1="13" x2="8" y2="15"/>' +
+    '<line x1="1" y1="8" x2="3" y2="8"/><line x1="13" y1="8" x2="15" y2="8"/>' +
+    '<line x1="3" y1="3" x2="4.5" y2="4.5"/><line x1="11.5" y1="11.5" x2="13" y2="13"/>' +
+    '<line x1="13" y1="3" x2="11.5" y2="4.5"/><line x1="4.5" y1="11.5" x2="3" y2="13"/>';
+
+  btn.addEventListener('click', () => {
+    dark = !dark;
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    svg.innerHTML = dark ? moonPath : sunPath;
+    btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  });
+})();
+
+/* ── YAML + Helm syntax highlighter (input backdrops) ───────────────────── */
+function escapeHtml(t) {
+  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function highlightInputLine(line) {
+  if (/^\s*#/.test(line)) {
+    return `<span class="yaml-comment">${escapeHtml(line)}</span>`;
+  }
+  const parts = [];
+  const helmRe = /(\{\{[\s\S]*?\}\})/g;
+  let last = 0, m;
+  while ((m = helmRe.exec(line)) !== null) {
+    if (m.index > last) parts.push({ type: 'yaml', text: line.slice(last, m.index) });
+    parts.push({ type: 'helm', text: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) parts.push({ type: 'yaml', text: line.slice(last) });
+
+  if (parts.length === 1 && parts[0].type === 'yaml') {
+    return highlightYamlSegmentFull(line);
+  }
+  return parts.map(p => {
+    if (p.type === 'helm') return `<span class="yaml-helm">${escapeHtml(p.text)}</span>`;
+    return highlightYamlInline(p.text);
+  }).join('');
+}
+
+function highlightYamlSegmentFull(line) {
+  const esc = escapeHtml(line);
+  if (/^\s*-\s/.test(line) && !line.includes(':')) {
+    return `<span class="yaml-string">${esc}</span>`;
+  }
+  const keyVal = line.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:([ \t].*)$/);
+  if (keyVal) {
+    let v = escapeHtml(keyVal[3]);
+    v = v.replace(/\b(true|false|null)\b/g, '<span class="yaml-bool">$1</span>');
+    v = v.replace(/(?<![{A-Za-z])(-?\d+(\.\d+)?)(?![}\w])/g, '<span class="yaml-number">$1</span>');
+    return `${escapeHtml(keyVal[1])}<span class="yaml-key">${escapeHtml(keyVal[2])}</span>:<span class="yaml-string">${v}</span>`;
+  }
+  const keyOnly = line.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:\s*$/);
+  if (keyOnly) {
+    return `${escapeHtml(keyOnly[1])}<span class="yaml-key">${escapeHtml(keyOnly[2])}</span>:`;
+  }
+  return esc;
+}
+
+function highlightYamlInline(text) {
+  const esc = escapeHtml(text);
+  const kv = text.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:([ \t].*)?$/);
+  if (kv) {
+    const prefix = escapeHtml(kv[1]);
+    const key    = escapeHtml(kv[2]);
+    let val = kv[3] ? escapeHtml(kv[3]) : '';
+    val = val.replace(/\b(true|false|null)\b/g, '<span class="yaml-bool">$1</span>');
+    val = val.replace(/(?<![{A-Za-z])(-?\d+(\.\d+)?)(?![}\w])/g, '<span class="yaml-number">$1</span>');
+    return `${prefix}<span class="yaml-key">${key}</span>:${val ? `<span class="yaml-string">${val}</span>` : ''}`;
+  }
+  if (/^\s*(true|false|null)\s*$/.test(text)) return `<span class="yaml-bool">${esc}</span>`;
+  if (/^\s*-?\d+(\.\d+)?\s*$/.test(text))    return `<span class="yaml-number">${esc}</span>`;
+  return esc;
+}
+
+function highlightInputYAML(text) {
+  return text.split('\n').map(highlightInputLine).join('\n');
+}
+
+/* ── Line numbers + backdrop sync ──────────────────────────────────────── */
+function updateLines(textarea, lineDiv) {
+  const count = textarea.value.split('\n').length;
+  lineDiv.innerHTML = Array.from({ length: count }, (_, i) => i + 1).join('<br>');
+}
+
+function syncScroll(textarea, lineDiv, backdrop) {
+  lineDiv.scrollTop   = textarea.scrollTop;
+  backdrop.scrollTop  = textarea.scrollTop;
+  backdrop.scrollLeft = textarea.scrollLeft;
+}
+
+function updateBackdrop(textarea, backdrop) {
+  backdrop.innerHTML = highlightInputYAML(textarea.value);
+}
+
+function setupEditor(textarea, lineDiv, backdrop) {
+  updateLines(textarea, lineDiv);
+  updateBackdrop(textarea, backdrop);
+  textarea.addEventListener('input', () => {
+    updateLines(textarea, lineDiv);
+    updateBackdrop(textarea, backdrop);
+  });
+  textarea.addEventListener('scroll', () => syncScroll(textarea, lineDiv, backdrop));
+}
+
+setupEditor(templateEditor, document.getElementById('templateLines'), templateBackdrop);
+setupEditor(valuesEditor,   document.getElementById('valuesLines'),   valuesBackdrop);
+
+/* ── Console ────────────────────────────────────────────────────────────── */
+const consoleLed   = document.getElementById('consoleLed');
+const consoleCount = document.getElementById('consoleCount');
+
+function updateConsoleChrome() {
+  const items = consoleBody.querySelectorAll('.msg').length;
+  consoleCount.textContent = items ? `${items} message${items !== 1 ? 's' : ''}` : '';
+  consoleLed.classList.toggle('active', items > 0);
+}
+
+function addMessage(type, msg) {
+  const div = document.createElement('div');
+  div.className = `msg ${type}`;
+  const badge = document.createElement('span');
+  badge.className   = 'msg-badge';
+  badge.textContent = type.toUpperCase();
+  div.appendChild(badge);
+  div.appendChild(document.createTextNode(msg));
+  consoleBody.appendChild(div);
+  updateConsoleChrome();
+}
+
+function clearMessages() {
+  consoleBody.innerHTML = '';
+  warnings = [];
+  errors   = [];
+  updateConsoleChrome();
+}
+
+function setStatus() {
+  statusBadge.className = 'status';
+  if (errors.length)        { statusBadge.classList.add('error');   statusBadge.textContent = 'ERROR';   }
+  else if (warnings.length) { statusBadge.classList.add('warning'); statusBadge.textContent = 'WARNING'; }
+  else                      { statusBadge.classList.add('valid');   statusBadge.textContent = 'VALID';   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   YAML PARSER
+   ═══════════════════════════════════════════════════════════════════════════ */
+function parseScalar(raw) {
+  const s = raw.trim();
+  if (s === 'true'  || s === 'yes') return true;
+  if (s === 'false' || s === 'no' ) return false;
+  if (s === 'null'  || s === '~'  ) return null;
+  if (/^-?\d+$/.test(s))           return parseInt(s, 10);
+  if (/^-?\d+\.\d+$/.test(s))      return parseFloat(s);
+  if (/^["'](.*)["']$/.test(s))    return s.slice(1, -1);
+  return s;
+}
+
+function parseYAML(text) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\t/g, '  ').split('\n');
+  const tokens = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line    = lines[i];
+    const stripped = line.trimEnd();
+    if (!stripped.trim() || stripped.trim().startsWith('#')) continue;
+    const indent  = stripped.match(/^( *)/)[1].length;
+    const content = stripped.trim();
+    if (content.startsWith('- ')) {
+      tokens.push({ indent, type: 'sequence', rawValue: content.slice(2).trim(), lineIdx: i });
+    } else if (content === '-') {
+      tokens.push({ indent, type: 'sequence', rawValue: '', lineIdx: i });
+    } else {
+      const colon = content.indexOf(':');
+      if (colon === -1) continue;
+      tokens.push({ indent, type: 'mapping', key: content.slice(0, colon).trim(), rawValue: content.slice(colon + 1).trim(), lineIdx: i });
+    }
+  }
+
+  let pos = 0;
+
+  function parseValue(baseIndent) {
+    if (pos >= tokens.length) return undefined;
+    const next = tokens[pos];
+    if (next.indent <= baseIndent) return undefined;
+    return next.type === 'sequence' ? parseSequence(next.indent) : parseMapping(next.indent);
+  }
+
+  function parseMapping(atIndent) {
+    const obj = {};
+    while (pos < tokens.length) {
+      const tok = tokens[pos];
+      if (tok.indent < atIndent) break;
+      if (tok.indent > atIndent) { pos++; continue; }
+      if (tok.type === 'sequence') break;
+      pos++;
+      if (tok.rawValue === '') {
+        const child = parseValue(tok.indent);
+        obj[tok.key] = child !== undefined ? child : {};
+      } else {
+        obj[tok.key] = parseScalar(tok.rawValue);
+      }
+    }
+    return obj;
+  }
+
+  function parseSequence(atIndent) {
+    const arr = [];
+    while (pos < tokens.length) {
+      const tok = tokens[pos];
+      if (tok.indent < atIndent) break;
+      if (tok.indent > atIndent) { pos++; continue; }
+      if (tok.type !== 'sequence') break;
+      pos++;
+      if (tok.rawValue === '') {
+        const child = parseValue(tok.indent);
+        arr.push(child !== undefined ? child : {});
+      } else if (tok.rawValue.includes(':')) {
+        const item = {};
+        const ci = tok.rawValue.indexOf(':');
+        const k  = tok.rawValue.slice(0, ci).trim();
+        const v  = tok.rawValue.slice(ci + 1).trim();
+        item[k]  = parseScalar(v);
+        while (pos < tokens.length && tokens[pos].indent > atIndent && tokens[pos].type === 'mapping') {
+          const sub = tokens[pos++];
+          item[sub.key] = sub.rawValue === '' ? (parseValue(sub.indent) || {}) : parseScalar(sub.rawValue);
+        }
+        arr.push(item);
+      } else {
+        arr.push(parseScalar(tok.rawValue));
+      }
+    }
+    return arr;
+  }
+
+  if (tokens.length === 0) return {};
+  return parseMapping(0);
+}
+
+/* ── Path resolver ──────────────────────────────────────────────────────── */
+function resolvePath(obj, dotPath) {
+  const parts = dotPath.split('.');
+  let cur = obj;
+  for (const p of parts) {
+    if (cur === null || cur === undefined || typeof cur !== 'object') return undefined;
+    if (!Object.prototype.hasOwnProperty.call(cur, p)) return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+
+/* ── Expression evaluator ───────────────────────────────────────────────── */
+function splitPipes(expr) {
+  const parts = [];
+  let depth = 0, cur = '';
+  for (let i = 0; i < expr.length; i++) {
+    const c = expr[i];
+    if (c === '(') { depth++; cur += c; }
+    else if (c === ')') { depth--; cur += c; }
+    else if (c === '|' && depth === 0) { parts.push(cur.trim()); cur = ''; }
+    else { cur += c; }
+  }
+  parts.push(cur.trim());
+  return parts;
+}
+
+function evalStage(stage, vals) {
+  stage = stage.trim();
+  const parenDot = stage.match(/^\((.+)\)\.([A-Za-z0-9_\-]+)$/);
+  if (parenDot) {
+    const inner = evalStage(parenDot[1].trim(), vals);
+    if (inner !== undefined && inner !== null && typeof inner === 'object' && !Array.isArray(inner)) {
+      const v = inner[parenDot[2]];
+      return v !== undefined ? v : undefined;
+    }
+    return undefined;
+  }
+  const indexM = stage.match(/^index\s+(.+?)\s+(\d+)$/);
+  if (indexM) {
+    const target = evalStage(indexM[1].trim(), vals);
+    const idx    = parseInt(indexM[2], 10);
+    if (Array.isArray(target)) return target[idx];
+    return undefined;
+  }
+  if (/^\.Values\./.test(stage))  return resolvePath(vals, stage.replace(/^\.Values\./, ''));
+  if (/^\.Release\./.test(stage)) {
+    const k = stage.replace(/^\.Release\./, '');
+    return ({ Name:'release-name', Namespace:'default', Service:'Helm', Revision:'1', IsInstall:'true', IsUpgrade:'false' })[k];
+  }
+  if (/^\.Chart\./.test(stage)) {
+    const k = stage.replace(/^\.Chart\./, '');
+    return ({ Name:'chart', Version:'0.1.0', AppVersion:'1.0.0' })[k];
+  }
+  if (/^".*"$/.test(stage) || /^'.*'$/.test(stage)) return stage.slice(1, -1);
+  if (/^-?\d+(\.\d+)?$/.test(stage)) return stage;
+  return undefined;
+}
+
+function applyFilter(filter, val, vals) {
+  filter = filter.trim();
+  const defM = filter.match(/^default\s+(.+)$/);
+  if (defM) {
+    const isEmpty = (val === undefined || val === null || val === '' || val === false);
+    if (isEmpty) {
+      const fb = defM[1].trim();
+      if (/^["'].*["']$/.test(fb)) return fb.slice(1, -1);
+      const resolved = evalStage(fb, vals);
+      return resolved !== undefined ? resolved : fb;
+    }
+    return val;
+  }
+  if (val === undefined) return undefined;
+  if (filter === 'upper')    return String(val).toUpperCase();
+  if (filter === 'lower')    return String(val).toLowerCase();
+  if (filter === 'trim')     return String(val).trim();
+  if (filter === 'quote')    return `"${val}"`;
+  if (filter === 'squote')   return `'${val}'`;
+  if (filter === 'title')    return String(val).replace(/\b\w/g, c => c.toUpperCase());
+  if (filter === 'toString') return String(val);
+  if (filter === 'toYaml')   return String(val);
+  if (/^indent\s+\d+$/.test(filter))  return val;
+  if (/^nindent\s+\d+$/.test(filter)) return '\n' + val;
+  return val;
+}
+
+function evalExpr(raw, vals) {
+  const stages = splitPipes(raw);
+  let val = evalStage(stages[0], vals);
+  for (let i = 1; i < stages.length; i++) val = applyFilter(stages[i], val, vals);
+  return val;
+}
+
+/* ── Verify ─────────────────────────────────────────────────────────────── */
+function extractValuePaths(inner) {
+  const paths = [];
+  const re = /\.Values\.([A-Za-z0-9_.]+)/g;
+  let m;
+  while ((m = re.exec(inner)) !== null) paths.push(m[1]);
+  return paths;
+}
+
+function verifyInputs() {
+  clearMessages();
+  const template = templateEditor.value;
+  const values   = valuesEditor.value;
+
+  if (!template.trim()) errors.push('Template.yaml is empty.');
+  if (!values.trim())   errors.push('Values.yaml is empty.');
+
+  const openCount  = (template.match(/\{\{/g)  || []).length;
+  const closeCount = (template.match(/\}\}/g) || []).length;
+  if (openCount !== closeCount) errors.push('Unclosed template expression detected.');
+
+  const cfPatterns = [
+    [/\{\{-?\s*include\b/i, 'include'],
+    [/\{\{-?\s*range\b/i,   'range'],
+    [/\{\{-?\s*if\b/i,      'if'],
+    [/\{\{-?\s*tpl\b/i,     'tpl'],
+    [/\{\{-?\s*printf\b/i,  'printf'],
+  ];
+  cfPatterns.forEach(([re, name]) => {
+    if (re.test(template))
+      warnings.push(`Unsupported Helm expression: {{ ${name} … }} — will not be rendered.`);
+  });
+
+  let valuesObj = null;
+  try { if (values.trim()) valuesObj = parseYAML(values); }
+  catch (e) { errors.push('Values.yaml parse error: ' + e.message); }
+
+  if (valuesObj) {
+    const expRe = /\{\{-?\s*([\s\S]*?)\s*-?\}\}/g;
+    let m;
+    const warned = new Set();
+    while ((m = expRe.exec(template)) !== null) {
+      const inner = m[1].trim();
+      if (/^(end|else|-)$/.test(inner)) continue;
+      if (/^\.(Files|Capabilities|Template)/.test(inner)) continue;
+      extractValuePaths(inner).forEach(path => {
+        if (!warned.has(path)) {
+          const topKey = path.split('.')[0];
+          if (resolvePath(valuesObj, topKey) === undefined) {
+            warnings.push(`Missing value: .Values.${path}`);
+            warned.add(path);
+          }
+        }
+      });
+    }
+  }
+
+  errors.forEach(m   => addMessage('error',   m));
+  warnings.forEach(m => addMessage('warning', m));
+  if (!errors.length && !warnings.length) addMessage('success', 'Verification completed successfully.');
+  setStatus();
+  return errors.length === 0;
+}
+
+/* ── Render ─────────────────────────────────────────────────────────────── */
+function highlightOutputYAML(yaml) {
+  return yaml.split('\n').map(line => {
+    const esc = escapeHtml(line);
+    if (/^\s*#/.test(line)) return `<span class="yaml-comment">${esc}</span>`;
+    if (/^\s*-\s/.test(line) && !line.includes(':')) {
+      return `<span class="yaml-string">${esc}</span>`;
+    }
+    const m = line.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:([ \t].*)$/);
+    if (m) {
+      let v = escapeHtml(m[3]);
+      v = v.replace(/\b(true|false|null)\b/g, '<span class="yaml-bool">$1</span>');
+      v = v.replace(/(?<![{A-Za-z])(-?\d+(\.\d+)?)(?![}\w])/g, '<span class="yaml-number">$1</span>');
+      return `${escapeHtml(m[1])}<span class="yaml-key">${escapeHtml(m[2])}</span>:<span class="yaml-string">${v}</span>`;
+    }
+    return esc;
+  }).join('\n');
+}
+
+function renderTemplate() {
+  verifyInputs();
+  if (errors.length) { output.innerHTML = ''; return; }
+
+  const template = templateEditor.value;
+  let vals = {};
+  try { vals = parseYAML(valuesEditor.value); } catch { return; }
+
+  const rendered = template.replace(/\{\{-?\s*([\s\S]*?)\s*-?\}\}/g, (match, raw) => {
+    const expr = raw.trim();
+    if (/^(end|else|\/\*|-\s*$)/.test(expr))        return match;
+    if (/^(range|if|else\s+if|with)\b/.test(expr))   return match;
+    if (/^(include|tpl|printf|define)\b/.test(expr)) return match;
+    const result = evalExpr(expr, vals);
+    return result !== undefined ? String(result) : match;
+  });
+
+  output.innerHTML = highlightOutputYAML(rendered);
+  addMessage('success', 'Template rendered successfully.');
+  setStatus();
+}
+
+/* ── Button wiring ──────────────────────────────────────────────────────── */
+document.getElementById('renderBtn').addEventListener('click', renderTemplate);
+document.getElementById('verifyBtn').addEventListener('click', verifyInputs);
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  templateEditor.value = '';
+  valuesEditor.value   = '';
+  output.innerHTML     = '';
+  clearMessages();
+  updateLines(templateEditor, document.getElementById('templateLines'));
+  updateLines(valuesEditor,   document.getElementById('valuesLines'));
+  updateBackdrop(templateEditor, templateBackdrop);
+  updateBackdrop(valuesEditor,   valuesBackdrop);
+  statusBadge.className   = 'status valid';
+  statusBadge.textContent = 'VALID';
+});
+
+document.getElementById('copyBtn').addEventListener('click', async () => {
+  const text = output.innerText;
+  if (!text.trim()) { toast('Nothing to copy'); return; }
+  try { await navigator.clipboard.writeText(text); toast('Output copied'); }
+  catch { toast('Copy failed'); }
+});
+
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  const text = output.innerText;
+  if (!text.trim()) { toast('Nothing to download'); return; }
+  const blob = new Blob([text], { type: 'text/yaml' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = 'rendered-output.yaml';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Download started');
+});
+</script>
+</body>
+</html>
