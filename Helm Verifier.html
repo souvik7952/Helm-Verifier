@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -441,6 +441,7 @@ html, body {
   line-height: 1.65;
   overflow: hidden;
   user-select: none;
+  cursor: default;
   letter-spacing: 0;
   transition: color var(--transition);
 }
@@ -460,15 +461,21 @@ html, body {
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.65;
-  overflow: auto;
+  overflow: hidden;
   white-space: pre-wrap;
   word-break: break-word;
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
   background: transparent;
-  color: transparent;
+  color: var(--text);
   border: none;
   margin: 0;
   tab-size: 2;
+  -moz-tab-size: 2;
+  z-index: 0;
+  /* No transform — scroll is synced via scrollTop/scrollLeft directly */
+  box-sizing: border-box;
 }
 .highlight-backdrop::-webkit-scrollbar { display: none; }
 .highlight-backdrop { scrollbar-width: none; }
@@ -480,7 +487,7 @@ textarea {
   width: 100%;
   height: 100%;
   background: transparent;
-  color: transparent;
+  color: rgba(0,0,0,0);
   caret-color: var(--accent);
   border: none;
   resize: none;
@@ -494,8 +501,18 @@ textarea {
   word-break: break-word;
   z-index: 1;
   tab-size: 2;
+  -moz-tab-size: 2;
+  user-select: text;
+  -webkit-user-select: text;
+  box-sizing: border-box;
+  /* Prevent any browser-specific text adjustments */
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
 }
-textarea::selection { background: rgba(79,124,255,.22); }
+textarea::selection {
+  background: rgba(79,124,255,.35);
+  color: rgba(0,0,0,0);
+}
 textarea::-webkit-scrollbar { width: 6px; height: 6px; }
 textarea::-webkit-scrollbar-track { background: transparent; }
 textarea::-webkit-scrollbar-thumb {
@@ -512,17 +529,20 @@ textarea::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 .yaml-comment { color: var(--yaml-comment); font-style: italic; }
 .yaml-helm    { color: var(--yaml-helm); font-style: normal; }
 .yaml-plain   { color: var(--text); }
+.yaml-colon   { color: var(--text2); }
 
 /* ╔══════════════════════════════════════════════════════════╗
    ║  OUTPUT PANEL                                            ║
    ╚══════════════════════════════════════════════════════════╝ */
 .output {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   overflow: auto;
   padding: 15px 16px;
   font-family: var(--mono);
   font-size: 12.5px;
   white-space: pre-wrap;
+  word-break: break-word;
   line-height: 1.65;
   color: var(--text2);
 }
@@ -739,7 +759,7 @@ html { transition: background var(--transition); }
       </svg>
     </div>
     <span class="brand-name">Helm Verifier</span>
-    <span class="brand-version">v2</span>
+    <span class="brand-version">v8</span>
   </div>
 
   <div class="t-divider"></div>
@@ -795,7 +815,7 @@ html { transition: background var(--transition); }
   </button>
 
   <div class="status-container">
-    <div id="statusBadge" class="status valid">VALID</div>
+    <div id="statusBadge" class="status valid">READY</div>
   </div>
 </div>
 
@@ -848,7 +868,14 @@ html { transition: background var(--transition); }
         <span class="panel-label">Output</span>
         <span class="panel-tag">rendered</span>
       </div>
-      <div class="output" id="output"></div>
+      <div class="editor-wrapper">
+        <div class="editor">
+          <div class="line-numbers" id="outputLines">—</div>
+          <div class="code-area">
+            <div class="output" id="output"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -877,32 +904,36 @@ const templateBackdrop = document.getElementById('templateBackdrop');
 const valuesBackdrop   = document.getElementById('valuesBackdrop');
 const output           = document.getElementById('output');
 const consoleBody      = document.getElementById('console');
+const outputLines      = document.getElementById('outputLines');
 const statusBadge      = document.getElementById('statusBadge');
 
 let warnings = [];
 let errors   = [];
 
-/* ── Toast ──────────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   TOAST
+   ══════════════════════════════════════════════════════════════════════════ */
 function toast(message) {
   const t = document.getElementById('toast');
-  t.textContent = message;
+  // Use innerHTML with a span so the ::before pseudo-element is preserved
+  t.innerHTML = `<span style="pointer-events:none">${escapeHtml(message)}</span>`;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-/* ── Theme toggle ───────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME TOGGLE
+   ══════════════════════════════════════════════════════════════════════════ */
 (function () {
   const btn = document.getElementById('themeBtn');
   const svg = document.getElementById('themeSvg');
   let dark = true;
-
   const moonPath = '<path d="M13.5 10.5A6 6 0 0 1 5.5 2.5a6 6 0 1 0 8 8z"/>';
   const sunPath  = '<circle cx="8" cy="8" r="3.5"/>' +
     '<line x1="8" y1="1" x2="8" y2="3"/><line x1="8" y1="13" x2="8" y2="15"/>' +
     '<line x1="1" y1="8" x2="3" y2="8"/><line x1="13" y1="8" x2="15" y2="8"/>' +
     '<line x1="3" y1="3" x2="4.5" y2="4.5"/><line x1="11.5" y1="11.5" x2="13" y2="13"/>' +
     '<line x1="13" y1="3" x2="11.5" y2="4.5"/><line x1="4.5" y1="11.5" x2="3" y2="13"/>';
-
   btn.addEventListener('click', () => {
     dark = !dark;
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
@@ -911,15 +942,18 @@ function toast(message) {
   });
 })();
 
-/* ── YAML + Helm syntax highlighter (input backdrops) ───────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   HTML ESCAPE
+   ══════════════════════════════════════════════════════════════════════════ */
 function escapeHtml(t) {
   return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   YAML + HELM SYNTAX HIGHLIGHTER  (input backdrops)
+   ══════════════════════════════════════════════════════════════════════════ */
 function highlightInputLine(line) {
-  if (/^\s*#/.test(line)) {
-    return `<span class="yaml-comment">${escapeHtml(line)}</span>`;
-  }
+  if (/^\s*#/.test(line)) return `<span class="yaml-comment">${escapeHtml(line)}</span>`;
   const parts = [];
   const helmRe = /(\{\{[\s\S]*?\}\})/g;
   let last = 0, m;
@@ -929,45 +963,40 @@ function highlightInputLine(line) {
     last = m.index + m[0].length;
   }
   if (last < line.length) parts.push({ type: 'yaml', text: line.slice(last) });
-
-  if (parts.length === 1 && parts[0].type === 'yaml') {
-    return highlightYamlSegmentFull(line);
-  }
-  return parts.map(p => {
-    if (p.type === 'helm') return `<span class="yaml-helm">${escapeHtml(p.text)}</span>`;
-    return highlightYamlInline(p.text);
-  }).join('');
+  if (parts.length === 1 && parts[0].type === 'yaml') return highlightYamlSegmentFull(line);
+  return parts.map(p =>
+    p.type === 'helm'
+      ? `<span class="yaml-helm">${escapeHtml(p.text)}</span>`
+      : highlightYamlInline(p.text)
+  ).join('');
 }
 
 function highlightYamlSegmentFull(line) {
   const esc = escapeHtml(line);
-  if (/^\s*-\s/.test(line) && !line.includes(':')) {
-    return `<span class="yaml-string">${esc}</span>`;
-  }
-  const keyVal = line.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:([ \t].*)$/);
+  if (/^\s*-\s/.test(line) && !line.includes(':')) return `<span class="yaml-string">${esc}</span>`;
+  // Match key: value (value must start with space/tab; negative lookahead avoids URL false-positives)
+  const keyVal = line.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:(?!\/\/)([ \t].*)$/);
   if (keyVal) {
     let v = escapeHtml(keyVal[3]);
     v = v.replace(/\b(true|false|null)\b/g, '<span class="yaml-bool">$1</span>');
     v = v.replace(/(?<![{A-Za-z])(-?\d+(\.\d+)?)(?![}\w])/g, '<span class="yaml-number">$1</span>');
-    return `${escapeHtml(keyVal[1])}<span class="yaml-key">${escapeHtml(keyVal[2])}</span>:<span class="yaml-string">${v}</span>`;
+    return `${escapeHtml(keyVal[1])}<span class="yaml-key">${escapeHtml(keyVal[2])}</span><span class="yaml-colon">:</span><span class="yaml-string">${v}</span>`;
   }
   const keyOnly = line.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:\s*$/);
-  if (keyOnly) {
-    return `${escapeHtml(keyOnly[1])}<span class="yaml-key">${escapeHtml(keyOnly[2])}</span>:`;
-  }
+  if (keyOnly) return `${escapeHtml(keyOnly[1])}<span class="yaml-key">${escapeHtml(keyOnly[2])}</span><span class="yaml-colon">:</span>`;
   return esc;
 }
 
 function highlightYamlInline(text) {
   const esc = escapeHtml(text);
-  const kv = text.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:([ \t].*)?$/);
+  const kv = text.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:(?!\/\/)([ \t].*)?$/);
   if (kv) {
     const prefix = escapeHtml(kv[1]);
     const key    = escapeHtml(kv[2]);
     let val = kv[3] ? escapeHtml(kv[3]) : '';
     val = val.replace(/\b(true|false|null)\b/g, '<span class="yaml-bool">$1</span>');
     val = val.replace(/(?<![{A-Za-z])(-?\d+(\.\d+)?)(?![}\w])/g, '<span class="yaml-number">$1</span>');
-    return `${prefix}<span class="yaml-key">${key}</span>:${val ? `<span class="yaml-string">${val}</span>` : ''}`;
+    return `${prefix}<span class="yaml-key">${key}</span><span class="yaml-colon">:</span>${val ? `<span class="yaml-string">${val}</span>` : ''}`;
   }
   if (/^\s*(true|false|null)\s*$/.test(text)) return `<span class="yaml-bool">${esc}</span>`;
   if (/^\s*-?\d+(\.\d+)?\s*$/.test(text))    return `<span class="yaml-number">${esc}</span>`;
@@ -978,36 +1007,97 @@ function highlightInputYAML(text) {
   return text.split('\n').map(highlightInputLine).join('\n');
 }
 
-/* ── Line numbers + backdrop sync ──────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   LINE NUMBERS + BACKDROP SYNC
+   ══════════════════════════════════════════════════════════════════════════ */
 function updateLines(textarea, lineDiv) {
   const count = textarea.value.split('\n').length;
   lineDiv.innerHTML = Array.from({ length: count }, (_, i) => i + 1).join('<br>');
 }
-
 function syncScroll(textarea, lineDiv, backdrop) {
-  lineDiv.scrollTop   = textarea.scrollTop;
+  lineDiv.scrollTop = textarea.scrollTop;
+  // Sync backdrop scroll directly — identical to textarea scroll position.
+  // This avoids the sub-pixel transform misalignment that caused cursor drift.
   backdrop.scrollTop  = textarea.scrollTop;
   backdrop.scrollLeft = textarea.scrollLeft;
 }
-
 function updateBackdrop(textarea, backdrop) {
   backdrop.innerHTML = highlightInputYAML(textarea.value);
 }
-
 function setupEditor(textarea, lineDiv, backdrop) {
   updateLines(textarea, lineDiv);
   updateBackdrop(textarea, backdrop);
-  textarea.addEventListener('input', () => {
-    updateLines(textarea, lineDiv);
-    updateBackdrop(textarea, backdrop);
-  });
-  textarea.addEventListener('scroll', () => syncScroll(textarea, lineDiv, backdrop));
-}
 
+  // Defer all visual updates via rAF so the browser completes its native
+  // text-editing (caret placement, selection, deletion) BEFORE we mutate
+  // the backdrop DOM. This prevents the backdrop innerHTML rewrite from
+  // interfering with selection state and backspace/delete behaviour.
+  let rafPending = false;
+  function scheduleUpdate() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      updateLines(textarea, lineDiv);
+      updateBackdrop(textarea, backdrop);
+      syncScroll(textarea, lineDiv, backdrop);
+    });
+  }
+
+  textarea.addEventListener('input', scheduleUpdate);
+  textarea.addEventListener('scroll', () => syncScroll(textarea, lineDiv, backdrop));
+
+  // Re-sync scroll position after any keyboard navigation or mouse interaction
+  // that may change scroll position without firing 'scroll' (e.g. arrow keys
+  // scrolling the viewport when caret moves near edge).
+  textarea.addEventListener('keyup', () => syncScroll(textarea, lineDiv, backdrop));
+  textarea.addEventListener('mouseup', () => syncScroll(textarea, lineDiv, backdrop));
+  textarea.addEventListener('click', () => syncScroll(textarea, lineDiv, backdrop));
+
+  // Keep backdrop in sync when container resizes (window resize, panel resize)
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => syncScroll(textarea, lineDiv, backdrop));
+    ro.observe(textarea);
+  }
+
+  // Intercept paste — insert plain text at cursor ourselves so we control
+  // the value synchronously, then schedule a visual refresh.
+  textarea.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const clip = (e.clipboardData || window.clipboardData).getData('text');
+    if (!clip) return;
+    const start = textarea.selectionStart;
+    const end   = textarea.selectionEnd;
+    textarea.value = textarea.value.substring(0, start) + clip + textarea.value.substring(end);
+    textarea.selectionStart = textarea.selectionEnd = start + clip.length;
+    scheduleUpdate();
+  });
+
+  // Drop — browser controls drop timing, always defer.
+  textarea.addEventListener('drop', () => {
+    requestAnimationFrame(() => {
+      scheduleUpdate();
+      textarea.focus();
+    });
+  });
+
+  // Tab — insert two spaces; schedule visual update AFTER setting caret.
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const start = textarea.selectionStart;
+    const end   = textarea.selectionEnd;
+    textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+    textarea.selectionStart = textarea.selectionEnd = start + 2;
+    scheduleUpdate();
+  });
+}
 setupEditor(templateEditor, document.getElementById('templateLines'), templateBackdrop);
 setupEditor(valuesEditor,   document.getElementById('valuesLines'),   valuesBackdrop);
 
-/* ── Console ────────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   CONSOLE
+   ══════════════════════════════════════════════════════════════════════════ */
 const consoleLed   = document.getElementById('consoleLed');
 const consoleCount = document.getElementById('consoleCount');
 
@@ -1016,7 +1106,6 @@ function updateConsoleChrome() {
   consoleCount.textContent = items ? `${items} message${items !== 1 ? 's' : ''}` : '';
   consoleLed.classList.toggle('active', items > 0);
 }
-
 function addMessage(type, msg) {
   const div = document.createElement('div');
   div.className = `msg ${type}`;
@@ -1028,14 +1117,12 @@ function addMessage(type, msg) {
   consoleBody.appendChild(div);
   updateConsoleChrome();
 }
-
 function clearMessages() {
   consoleBody.innerHTML = '';
   warnings = [];
   errors   = [];
   updateConsoleChrome();
 }
-
 function setStatus() {
   statusBadge.className = 'status';
   if (errors.length)        { statusBadge.classList.add('error');   statusBadge.textContent = 'ERROR';   }
@@ -1043,9 +1130,9 @@ function setStatus() {
   else                      { statusBadge.classList.add('valid');   statusBadge.textContent = 'VALID';   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════════════════════════
    YAML PARSER
-   ═══════════════════════════════════════════════════════════════════════════ */
+   ══════════════════════════════════════════════════════════════════════════ */
 function parseScalar(raw) {
   const s = raw.trim();
   if (s === 'true'  || s === 'yes') return true;
@@ -1053,7 +1140,8 @@ function parseScalar(raw) {
   if (s === 'null'  || s === '~'  ) return null;
   if (/^-?\d+$/.test(s))           return parseInt(s, 10);
   if (/^-?\d+\.\d+$/.test(s))      return parseFloat(s);
-  if (/^["'](.*)["']$/.test(s))    return s.slice(1, -1);
+  if (/^"(.*)"$/.test(s))          return s.slice(1, -1);
+  if (/^'(.*)'$/.test(s))          return s.slice(1, -1);
   return s;
 }
 
@@ -1061,7 +1149,7 @@ function parseYAML(text) {
   const lines = text.replace(/\r\n/g, '\n').replace(/\t/g, '  ').split('\n');
   const tokens = [];
   for (let i = 0; i < lines.length; i++) {
-    const line    = lines[i];
+    const line     = lines[i];
     const stripped = line.trimEnd();
     if (!stripped.trim() || stripped.trim().startsWith('#')) continue;
     const indent  = stripped.match(/^( *)/)[1].length;
@@ -1076,16 +1164,13 @@ function parseYAML(text) {
       tokens.push({ indent, type: 'mapping', key: content.slice(0, colon).trim(), rawValue: content.slice(colon + 1).trim(), lineIdx: i });
     }
   }
-
   let pos = 0;
-
   function parseValue(baseIndent) {
     if (pos >= tokens.length) return undefined;
     const next = tokens[pos];
     if (next.indent <= baseIndent) return undefined;
     return next.type === 'sequence' ? parseSequence(next.indent) : parseMapping(next.indent);
   }
-
   function parseMapping(atIndent) {
     const obj = {};
     while (pos < tokens.length) {
@@ -1103,7 +1188,6 @@ function parseYAML(text) {
     }
     return obj;
   }
-
   function parseSequence(atIndent) {
     const arr = [];
     while (pos < tokens.length) {
@@ -1117,10 +1201,10 @@ function parseYAML(text) {
         arr.push(child !== undefined ? child : {});
       } else if (tok.rawValue.includes(':')) {
         const item = {};
-        const ci = tok.rawValue.indexOf(':');
-        const k  = tok.rawValue.slice(0, ci).trim();
-        const v  = tok.rawValue.slice(ci + 1).trim();
-        item[k]  = parseScalar(v);
+        const ci   = tok.rawValue.indexOf(':');
+        const k    = tok.rawValue.slice(0, ci).trim();
+        const v    = tok.rawValue.slice(ci + 1).trim();
+        item[k]    = parseScalar(v);
         while (pos < tokens.length && tokens[pos].indent > atIndent && tokens[pos].type === 'mapping') {
           const sub = tokens[pos++];
           item[sub.key] = sub.rawValue === '' ? (parseValue(sub.indent) || {}) : parseScalar(sub.rawValue);
@@ -1132,12 +1216,13 @@ function parseYAML(text) {
     }
     return arr;
   }
-
   if (tokens.length === 0) return {};
   return parseMapping(0);
 }
 
-/* ── Path resolver ──────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   PATH RESOLVER
+   ══════════════════════════════════════════════════════════════════════════ */
 function resolvePath(obj, dotPath) {
   const parts = dotPath.split('.');
   let cur = obj;
@@ -1149,88 +1234,858 @@ function resolvePath(obj, dotPath) {
   return cur;
 }
 
-/* ── Expression evaluator ───────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   EXPRESSION EVALUATOR
+   ctx = { vals, dot, vars }
+   ══════════════════════════════════════════════════════════════════════════ */
+const UNDEF = Symbol('undef');
+
+function isTruthy(v) {
+  if (v === UNDEF || v === undefined || v === null || v === false || v === '' || v === 0) return false;
+  if (Array.isArray(v) && v.length === 0) return false;
+  if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) return false;
+  return true;
+}
+
+const RELEASE_STUB = { Name:'release-name', Namespace:'default', Service:'Helm', Revision:1, IsInstall:true, IsUpgrade:false };
+const CHART_STUB   = { Name:'chart', Version:'0.1.0', AppVersion:'1.0.0', Description:'A Helm chart' };
+
+function toNum(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
+
+/* ── Argument tokeniser ──────────────────────────────────────────────────── */
+function tokeniseArgs(str) {
+  const args = [];
+  let cur = '', depth = 0, inStr = false, strChar = '';
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i];
+    if (inStr) {
+      cur += c;
+      if (c === strChar && str[i - 1] !== '\\') inStr = false;
+    } else if (c === '"' || c === "'") {
+      inStr = true; strChar = c; cur += c;
+    } else if (c === '(') {
+      depth++; cur += c;
+    } else if (c === ')') {
+      depth--; cur += c;
+    } else if (c === ' ' && depth === 0) {
+      if (cur) { args.push(cur); cur = ''; }
+    } else {
+      cur += c;
+    }
+  }
+  if (cur) args.push(cur);
+  return args;
+}
+
+/* ── pipe splitter ───────────────────────────────────────────────────────── */
 function splitPipes(expr) {
   const parts = [];
   let depth = 0, cur = '';
   for (let i = 0; i < expr.length; i++) {
     const c = expr[i];
-    if (c === '(') { depth++; cur += c; }
-    else if (c === ')') { depth--; cur += c; }
-    else if (c === '|' && depth === 0) { parts.push(cur.trim()); cur = ''; }
-    else { cur += c; }
+    if      (c === '(')              { depth++; cur += c; }
+    else if (c === ')')              { depth--; cur += c; }
+    else if (c === '|' && depth===0) { parts.push(cur.trim()); cur = ''; }
+    else                             { cur += c; }
   }
   parts.push(cur.trim());
   return parts;
 }
 
-function evalStage(stage, vals) {
+/* ── JS→YAML serialiser ──────────────────────────────────────────────────── */
+function jsToYaml(v, indent) {
+  const pad = '  '.repeat(indent);
+  if (v === null || v === undefined) return 'null';
+  if (typeof v === 'boolean') return String(v);
+  if (typeof v === 'number')  return String(v);
+  if (typeof v === 'string') {
+    if (/[:\{\}\[\],&*#\?|\-<>=!%@`]/.test(v) || v.includes('\n') || v.trim() !== v)
+      return `"${v.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"`;
+    return v;
+  }
+  if (Array.isArray(v)) {
+    if (!v.length) return '[]';
+    return v.map(item => `\n${pad}- ${jsToYaml(item, indent+1)}`).join('');
+  }
+  if (typeof v === 'object') {
+    const keys = Object.keys(v);
+    if (!keys.length) return '{}';
+    return keys.map(k => `\n${pad}${k}: ${jsToYaml(v[k], indent+1)}`).join('');
+  }
+  return String(v);
+}
+
+/* ── Minimal Go sprintf ──────────────────────────────────────────────────── */
+function goSprintf(fmt, args) {
+  let i = 0;
+  return fmt.replace(/%([+\-# 0]*)(\d*)(?:\.(\d+))?([vdsfxXoObteqp%])/g, (_, flags, width, prec, verb) => {
+    if (verb === '%') return '%';
+    const val = i < args.length ? args[i++] : '';
+    const w   = width ? parseInt(width) : 0;
+    let s;
+    switch (verb) {
+      case 'd': s = String(Math.trunc(Number(val))); break;
+      case 'f': s = prec !== undefined ? Number(val).toFixed(parseInt(prec)) : Number(val).toString(); break;
+      case 'e': s = Number(val).toExponential(prec !== undefined ? parseInt(prec) : 6); break;
+      case 'x': s = Math.trunc(Number(val)).toString(16); break;
+      case 'X': s = Math.trunc(Number(val)).toString(16).toUpperCase(); break;
+      case 'o': s = Math.trunc(Number(val)).toString(8); break;
+      case 'b': s = Math.trunc(Number(val)).toString(2); break;
+      case 's': case 'v': s = val === null || val === undefined ? '' : String(val); break;
+      case 'q': s = JSON.stringify(val === null ? '' : String(val)); break;
+      default:  s = String(val);
+    }
+    if (w && s.length < w) {
+      s = flags.includes('-') ? s.padEnd(w) : (flags.includes('0') ? s.padStart(w,'0') : s.padStart(w));
+    }
+    return s;
+  });
+}
+
+/* ── evalStage ───────────────────────────────────────────────────────────── */
+function evalStage(stage, ctx) {
   stage = stage.trim();
+  if (!stage) return UNDEF;
+
+  // Comments
+  if (/^\/\*[\s\S]*\*\/$/.test(stage)) return '';
+
+  // Parenthesised sub-expression
+  if (stage.startsWith('(') && stage.endsWith(')'))
+    return evalExprCtx(stage.slice(1,-1).trim(), ctx);
+
+  // (expr).Field
   const parenDot = stage.match(/^\((.+)\)\.([A-Za-z0-9_\-]+)$/);
   if (parenDot) {
-    const inner = evalStage(parenDot[1].trim(), vals);
-    if (inner !== undefined && inner !== null && typeof inner === 'object' && !Array.isArray(inner)) {
-      const v = inner[parenDot[2]];
-      return v !== undefined ? v : undefined;
+    const inner = evalExprCtx(parenDot[1].trim(), ctx);
+    if (inner !== UNDEF && inner !== null && typeof inner === 'object' && !Array.isArray(inner))
+      return inner[parenDot[2]] !== undefined ? inner[parenDot[2]] : UNDEF;
+    return UNDEF;
+  }
+
+  // String literals
+  if (/^"(.*)"$/.test(stage)) return stage.slice(1,-1);
+  if (/^'(.*)'$/.test(stage)) return stage.slice(1,-1);
+
+  // Boolean / null literals
+  if (stage === 'true')  return true;
+  if (stage === 'false') return false;
+  if (stage === 'null' || stage === 'nil') return null;
+
+  // Numeric literal
+  if (/^-?\d+(\.\d+)?$/.test(stage)) return Number(stage);
+
+  // $variable
+  if (stage.startsWith('$')) {
+    const varName = stage.slice(1);
+    if (varName === '' || varName === '.') return ctx.dot;
+    return ctx.vars.hasOwnProperty(varName) ? ctx.vars[varName] : UNDEF;
+  }
+
+  // Dot (.)
+  if (stage === '.') return ctx.dot;
+
+  // .fieldName on current dot scope (non-special prefixes)
+  if (/^\.[A-Za-z_][A-Za-z0-9_.]*$/.test(stage) &&
+      !stage.startsWith('.Values') && !stage.startsWith('.Release') &&
+      !stage.startsWith('.Chart')  && !stage.startsWith('.Capabilities') &&
+      !stage.startsWith('.Files')  && !stage.startsWith('.Template')) {
+    const field = stage.slice(1);
+    if (ctx.dot !== null && ctx.dot !== undefined && typeof ctx.dot === 'object')
+      return resolvePath(ctx.dot, field) !== undefined ? resolvePath(ctx.dot, field) : UNDEF;
+    return UNDEF;
+  }
+
+  // .Values
+  if (stage === '.Values') return ctx.vals;
+  if (stage.startsWith('.Values.')) {
+    const v = resolvePath(ctx.vals, stage.slice(8));
+    return v !== undefined ? v : UNDEF;
+  }
+
+  // .Release
+  if (stage.startsWith('.Release.')) {
+    const k = stage.slice(9);
+    return RELEASE_STUB.hasOwnProperty(k) ? RELEASE_STUB[k] : UNDEF;
+  }
+
+  // .Chart
+  if (stage.startsWith('.Chart.')) {
+    const k = stage.slice(7);
+    return CHART_STUB.hasOwnProperty(k) ? CHART_STUB[k] : UNDEF;
+  }
+
+  // .Capabilities / .Files / .Template
+  if (stage.startsWith('.Capabilities')) return '[Capabilities]';
+  if (stage.startsWith('.Files'))        return '[Files]';
+  if (stage.startsWith('.Template'))     return '[Template]';
+
+  // index
+  { const indexM = stage.match(/^index\s+(.+)$/);
+    if (indexM) {
+      const args = tokeniseArgs(indexM[1]);
+      if (args.length >= 2) {
+        let target = evalStage(args[0], ctx);
+        for (let i = 1; i < args.length; i++) {
+          const k = evalStage(args[i], ctx);
+          if (k === UNDEF || target === UNDEF || target == null) { target = UNDEF; break; }
+          target = typeof target === 'object' ? (target[k] !== undefined ? target[k] : UNDEF) : UNDEF;
+        }
+        return target;
+      }
     }
-    return undefined;
   }
-  const indexM = stage.match(/^index\s+(.+?)\s+(\d+)$/);
-  if (indexM) {
-    const target = evalStage(indexM[1].trim(), vals);
-    const idx    = parseInt(indexM[2], 10);
-    if (Array.isArray(target)) return target[idx];
-    return undefined;
+
+  // len
+  { const lenM = stage.match(/^len\s+(.+)$/);
+    if (lenM) {
+      const v = evalStage(lenM[1].trim(), ctx);
+      if (v === UNDEF || v == null) return 0;
+      if (typeof v === 'string' || Array.isArray(v)) return v.length;
+      if (typeof v === 'object') return Object.keys(v).length;
+      return 0;
+    }
   }
-  if (/^\.Values\./.test(stage))  return resolvePath(vals, stage.replace(/^\.Values\./, ''));
-  if (/^\.Release\./.test(stage)) {
-    const k = stage.replace(/^\.Release\./, '');
-    return ({ Name:'release-name', Namespace:'default', Service:'Helm', Revision:'1', IsInstall:'true', IsUpgrade:'false' })[k];
+
+  // Arithmetic
+  { const arithM = stage.match(/^(add|sub|mul|div|mod|addf|subf|mulf|divf)\s+(.+)$/);
+    if (arithM) {
+      const op   = arithM[1];
+      const args = tokeniseArgs(arithM[2]).map(a => toNum(evalStage(a, ctx)));
+      if (args.length < 2) return UNDEF;
+      switch (op) {
+        case 'add': case 'addf': return args.reduce((a,b) => a+b);
+        case 'sub': case 'subf': return args[0] - args[1];
+        case 'mul': case 'mulf': return args.reduce((a,b) => a*b);
+        case 'div': case 'divf': return args[1] !== 0 ? args[0] / args[1] : UNDEF;
+        case 'mod':              return args[1] !== 0 ? args[0] % args[1] : UNDEF;
+      }
+    }
   }
-  if (/^\.Chart\./.test(stage)) {
-    const k = stage.replace(/^\.Chart\./, '');
-    return ({ Name:'chart', Version:'0.1.0', AppVersion:'1.0.0' })[k];
+
+  // Comparison
+  { const cmpM = stage.match(/^(eq|ne|lt|le|gt|ge)\s+(.+)$/);
+    if (cmpM) {
+      const args = tokeniseArgs(cmpM[2]).map(a => evalStage(a, ctx));
+      if (args.length < 2) return false;
+      const [a, b] = args;
+      switch (cmpM[1]) {
+        case 'eq': return a === b || String(a) === String(b);
+        case 'ne': return a !== b && String(a) !== String(b);
+        case 'lt': return toNum(a) <  toNum(b);
+        case 'le': return toNum(a) <= toNum(b);
+        case 'gt': return toNum(a) >  toNum(b);
+        case 'ge': return toNum(a) >= toNum(b);
+      }
+    }
   }
-  if (/^".*"$/.test(stage) || /^'.*'$/.test(stage)) return stage.slice(1, -1);
-  if (/^-?\d+(\.\d+)?$/.test(stage)) return stage;
-  return undefined;
+
+  // Logic: and / or / not
+  { const andM = stage.match(/^and\s+(.+)$/);
+    if (andM) {
+      const args = tokeniseArgs(andM[1]).map(a => evalStage(a, ctx));
+      let last = true;
+      for (const a of args) { if (!isTruthy(a)) return false; last = a; }
+      return last;
+    }
+  }
+  { const orM = stage.match(/^or\s+(.+)$/);
+    if (orM) {
+      const args = tokeniseArgs(orM[1]).map(a => evalStage(a, ctx));
+      for (const a of args) { if (isTruthy(a)) return a; }
+      return false;
+    }
+  }
+  { const notM = stage.match(/^not\s+(.+)$/);
+    if (notM) return !isTruthy(evalStage(notM[1].trim(), ctx));
+  }
+
+  // printf / sprintf
+  { const pfM = stage.match(/^s?printf\s+(.+)$/);
+    if (pfM) {
+      const args   = tokeniseArgs(pfM[1]);
+      const fmtVal = evalStage(args[0], ctx);
+      const fmtStr = fmtVal === UNDEF ? '' : String(fmtVal);
+      const rest   = args.slice(1).map(a => { const v = evalStage(a, ctx); return v === UNDEF ? '' : v; });
+      return goSprintf(fmtStr, rest);
+    }
+  }
+
+  // String functions (2-arg form: fn arg1 arg2)
+  { const trimAllM = stage.match(/^trimAll\s+(.+?)\s+(.+)$/);
+    if (trimAllM) {
+      const chars = String(evalStage(trimAllM[1], ctx));
+      const val   = evalStage(trimAllM[2], ctx);
+      if (val === UNDEF) return UNDEF;
+      const esc = chars.replace(/[-\]\\^]/g, '\\$&');
+      return String(val).replace(new RegExp(`^[${esc}]+|[${esc}]+$`, 'g'), '');
+    }
+  }
+  { const tpM = stage.match(/^(trimPrefix|trimSuffix)\s+(.+?)\s+(.+)$/);
+    if (tpM) {
+      const prefix = String(evalStage(tpM[2], ctx));
+      const target = String(evalStage(tpM[3], ctx));
+      return tpM[1] === 'trimPrefix'
+        ? (target.startsWith(prefix) ? target.slice(prefix.length) : target)
+        : (target.endsWith(prefix)   ? target.slice(0,-prefix.length) : target);
+    }
+  }
+  { const repM = stage.match(/^replace\s+(.+)$/);
+    if (repM) {
+      const args = tokeniseArgs(repM[1]);
+      if (args.length === 3)
+        return String(evalStage(args[2], ctx)).split(String(evalStage(args[0], ctx))).join(String(evalStage(args[1], ctx)));
+    }
+  }
+  { const contM = stage.match(/^contains\s+(.+)$/);
+    if (contM) {
+      const args = tokeniseArgs(contM[1]);
+      if (args.length === 2)
+        return String(evalStage(args[0], ctx)).includes(String(evalStage(args[1], ctx)));
+    }
+  }
+  { const hpM = stage.match(/^(hasPrefix|hasSuffix)\s+(.+)$/);
+    if (hpM) {
+      const args = tokeniseArgs(hpM[2]);
+      if (args.length === 2) {
+        const p = String(evalStage(args[0], ctx)), s = String(evalStage(args[1], ctx));
+        return hpM[1] === 'hasPrefix' ? s.startsWith(p) : s.endsWith(p);
+      }
+    }
+  }
+  { const splitM = stage.match(/^split\s+(.+)$/);
+    if (splitM) {
+      const args = tokeniseArgs(splitM[1]);
+      if (args.length === 2)
+        return String(evalStage(args[1], ctx)).split(String(evalStage(args[0], ctx)));
+    }
+  }
+  { const joinM = stage.match(/^join\s+(.+)$/);
+    if (joinM) {
+      const args = tokeniseArgs(joinM[1]);
+      if (args.length === 2) {
+        const sep = String(evalStage(args[0], ctx));
+        const lst = evalStage(args[1], ctx);
+        return Array.isArray(lst) ? lst.join(sep) : String(lst);
+      }
+    }
+  }
+  { const repNM = stage.match(/^repeat\s+(.+)$/);
+    if (repNM) {
+      const args = tokeniseArgs(repNM[1]);
+      if (args.length === 2)
+        return String(evalStage(args[1], ctx)).repeat(Math.max(0, toNum(evalStage(args[0], ctx))));
+    }
+  }
+  { const substrM = stage.match(/^substr\s+(.+)$/);
+    if (substrM) {
+      const args = tokeniseArgs(substrM[1]);
+      if (args.length === 3)
+        return String(evalStage(args[2], ctx)).substr(toNum(evalStage(args[0], ctx)), toNum(evalStage(args[1], ctx)));
+    }
+  }
+  { const rxM = stage.match(/^(regexMatch|mustRegexMatch)\s+(.+)$/);
+    if (rxM) {
+      const args = tokeniseArgs(rxM[2]);
+      if (args.length === 2) {
+        try { return new RegExp(String(evalStage(args[0], ctx))).test(String(evalStage(args[1], ctx))); } catch { return false; }
+      }
+    }
+  }
+  { const rxrM = stage.match(/^(regexReplaceAll|mustRegexReplaceAll)\s+(.+)$/);
+    if (rxrM) {
+      const args = tokeniseArgs(rxrM[2]);
+      if (args.length === 3) {
+        const pat = String(evalStage(args[0], ctx)), repl = String(evalStage(args[1], ctx)), str = String(evalStage(args[2], ctx));
+        try { return str.replace(new RegExp(pat, 'g'), repl); } catch { return str; }
+      }
+    }
+  }
+  { const rxfM = stage.match(/^(regexFind|mustRegexFind)\s+(.+)$/);
+    if (rxfM) {
+      const args = tokeniseArgs(rxfM[2]);
+      if (args.length === 2) {
+        try { const m = String(evalStage(args[1], ctx)).match(new RegExp(String(evalStage(args[0], ctx)))); return m ? m[0] : ''; } catch { return ''; }
+      }
+    }
+  }
+
+  // Dict / collection
+  { const hkM = stage.match(/^hasKey\s+(.+)$/);
+    if (hkM) {
+      const args = tokeniseArgs(hkM[1]);
+      if (args.length === 2) {
+        const dict = evalStage(args[0], ctx), key = String(evalStage(args[1], ctx));
+        return dict !== UNDEF && typeof dict === 'object' && dict !== null && Object.prototype.hasOwnProperty.call(dict, key);
+      }
+    }
+  }
+  { const keysM = stage.match(/^keys\s+(.+)$/);
+    if (keysM) { const d = evalStage(keysM[1].trim(), ctx); return (d !== UNDEF && typeof d === 'object' && !Array.isArray(d)) ? Object.keys(d) : []; }
+  }
+  { const valsM = stage.match(/^values\s+(.+)$/);
+    if (valsM) { const d = evalStage(valsM[1].trim(), ctx); return (d !== UNDEF && typeof d === 'object' && !Array.isArray(d)) ? Object.values(d) : []; }
+  }
+  { const pickM = stage.match(/^pick\s+(.+)$/);
+    if (pickM) {
+      const args = tokeniseArgs(pickM[1]);
+      if (args.length >= 2) {
+        const dict = evalStage(args[0], ctx), result = {};
+        if (dict !== UNDEF && typeof dict === 'object')
+          args.slice(1).forEach(k => { const key = String(evalStage(k, ctx)); if (dict[key] !== undefined) result[key] = dict[key]; });
+        return result;
+      }
+    }
+  }
+  { const omitM = stage.match(/^omit\s+(.+)$/);
+    if (omitM) {
+      const args = tokeniseArgs(omitM[1]);
+      if (args.length >= 2) {
+        const dict = evalStage(args[0], ctx), skip = new Set(args.slice(1).map(k => String(evalStage(k, ctx)))), result = {};
+        if (dict !== UNDEF && typeof dict === 'object') Object.keys(dict).forEach(k => { if (!skip.has(k)) result[k] = dict[k]; });
+        return result;
+      }
+    }
+  }
+  { const listFnM = stage.match(/^(first|last|rest|initial|reverse|uniq|compact)\s+(.+)$/);
+    if (listFnM) {
+      const list = evalStage(listFnM[2].trim(), ctx);
+      if (!Array.isArray(list)) return UNDEF;
+      switch (listFnM[1]) {
+        case 'first':   return list.length ? list[0] : UNDEF;
+        case 'last':    return list.length ? list[list.length-1] : UNDEF;
+        case 'rest':    return list.slice(1);
+        case 'initial': return list.slice(0,-1);
+        case 'reverse': return [...list].reverse();
+        case 'uniq':    return [...new Set(list)];
+        case 'compact': return list.filter(v => isTruthy(v));
+      }
+    }
+  }
+  { const appendM = stage.match(/^append\s+(.+)$/);
+    if (appendM) {
+      const args = tokeniseArgs(appendM[1]);
+      if (args.length === 2) { const list = evalStage(args[0], ctx), val = evalStage(args[1], ctx); return Array.isArray(list) ? [...list, val] : [val]; }
+    }
+  }
+  { const prependM = stage.match(/^prepend\s+(.+)$/);
+    if (prependM) {
+      const args = tokeniseArgs(prependM[1]);
+      if (args.length === 2) { const list = evalStage(args[0], ctx), val = evalStage(args[1], ctx); return Array.isArray(list) ? [val, ...list] : [val]; }
+    }
+  }
+  { const concatM = stage.match(/^concat\s+(.+)$/);
+    if (concatM) return [].concat(...tokeniseArgs(concatM[1]).map(a => { const v = evalStage(a, ctx); return Array.isArray(v) ? v : [v]; }));
+  }
+  { const listM = stage.match(/^list\s+(.+)$/);
+    if (listM) return tokeniseArgs(listM[1]).map(a => evalStage(a, ctx));
+  }
+  { const dictM = stage.match(/^dict\s+(.+)$/);
+    if (dictM) {
+      const args = tokeniseArgs(dictM[1]), obj = {};
+      for (let i = 0; i < args.length-1; i += 2) obj[String(evalStage(args[i], ctx))] = evalStage(args[i+1], ctx);
+      return obj;
+    }
+  }
+  { const mergeM = stage.match(/^(merge|mergeOverwrite)\s+(.+)$/);
+    if (mergeM) {
+      const result = {};
+      tokeniseArgs(mergeM[2]).forEach(a => { const v = evalStage(a, ctx); if (typeof v === 'object' && v !== null) Object.assign(result, v); });
+      return result;
+    }
+  }
+
+  // Type / conversion
+  { const castM = stage.match(/^(int|int64|float64|atoi|toDecimal)\s+(.+)$/);
+    if (castM) { const v = evalStage(castM[2].trim(), ctx); return toNum(v === UNDEF ? 0 : v); }
+  }
+  { const jsonM = stage.match(/^(toJson|toPrettyJson|toRawJson)\s+(.+)$/);
+    if (jsonM) {
+      const v = evalStage(jsonM[2].trim(), ctx);
+      try { return jsonM[1] === 'toPrettyJson' ? JSON.stringify(v === UNDEF ? null : v, null, 2) : JSON.stringify(v === UNDEF ? null : v); } catch { return '{}'; }
+    }
+  }
+  { const fjM = stage.match(/^fromJson\s+(.+)$/);
+    if (fjM) { try { return JSON.parse(String(evalStage(fjM[1].trim(), ctx))); } catch { return UNDEF; } }
+  }
+  { const b64M = stage.match(/^(b64enc|b64dec)\s+(.+)$/);
+    if (b64M) { const s = String(evalStage(b64M[2].trim(), ctx) || ''); try { return b64M[1]==='b64enc' ? btoa(s) : atob(s); } catch { return s; } }
+  }
+  { const mathM = stage.match(/^(max|min|floor|ceil|round|abs)\s+(.+)$/);
+    if (mathM) {
+      const args = tokeniseArgs(mathM[2]).map(a => toNum(evalStage(a, ctx)));
+      switch (mathM[1]) {
+        case 'max': return Math.max(...args); case 'min': return Math.min(...args);
+        case 'floor': return Math.floor(args[0]); case 'ceil': return Math.ceil(args[0]);
+        case 'round': return Math.round(args[0]); case 'abs': return Math.abs(args[0]);
+      }
+    }
+  }
+  { const tyM = stage.match(/^toYaml\s+(.+)$/);
+    if (tyM) { const v = evalStage(tyM[1].trim(), ctx); return jsToYaml(v === UNDEF ? null : v, 0); }
+  }
+  if (stage === 'toYaml') return '';
+
+  // typeOf / kindOf
+  { const typeM = stage.match(/^(typeOf|kindOf)\s+(.+)$/);
+    if (typeM) {
+      const v = evalStage(typeM[2].trim(), ctx);
+      return v === null ? 'null' : Array.isArray(v) ? 'slice' : typeof v === 'object' ? 'map' : typeof v;
+    }
+  }
+
+  // include / template (stub)
+  if (/^(include|template)\s/.test(stage)) return `[${stage.split(/\s+/)[0]}]`;
+  if (/^tpl\s/.test(stage)) return '[tpl]';
+
+  return UNDEF;
 }
 
-function applyFilter(filter, val, vals) {
+/* ── applyFilter ─────────────────────────────────────────────────────────── */
+function applyFilter(filter, val, ctx) {
   filter = filter.trim();
+
+  // default
   const defM = filter.match(/^default\s+(.+)$/);
   if (defM) {
-    const isEmpty = (val === undefined || val === null || val === '' || val === false);
-    if (isEmpty) {
-      const fb = defM[1].trim();
-      if (/^["'].*["']$/.test(fb)) return fb.slice(1, -1);
-      const resolved = evalStage(fb, vals);
-      return resolved !== undefined ? resolved : fb;
-    }
+    const empty = (val === UNDEF || val === undefined || val === null || val === '' || val === false || (Array.isArray(val) && !val.length));
+    if (empty) { const r = evalStage(defM[1].trim(), ctx); return r !== UNDEF ? r : defM[1].trim().replace(/^["']|["']$/g, ''); }
     return val;
   }
-  if (val === undefined) return undefined;
-  if (filter === 'upper')    return String(val).toUpperCase();
-  if (filter === 'lower')    return String(val).toLowerCase();
-  if (filter === 'trim')     return String(val).trim();
-  if (filter === 'quote')    return `"${val}"`;
-  if (filter === 'squote')   return `'${val}'`;
-  if (filter === 'title')    return String(val).replace(/\b\w/g, c => c.toUpperCase());
-  if (filter === 'toString') return String(val);
-  if (filter === 'toYaml')   return String(val);
-  if (/^indent\s+\d+$/.test(filter))  return val;
-  if (/^nindent\s+\d+$/.test(filter)) return '\n' + val;
+
+  if (val === UNDEF) return UNDEF;
+
+  // String
+  if (filter === 'upper')      return String(val).toUpperCase();
+  if (filter === 'lower')      return String(val).toLowerCase();
+  if (filter === 'trim' || filter === 'trimSpace') return String(val).trim();
+  if (filter === 'title')      return String(val).replace(/\b\w/g, c => c.toUpperCase());
+  if (filter === 'untitle')    return String(val).replace(/\b\w/g, c => c.toLowerCase());
+  if (filter === 'quote')      return `"${String(val).replace(/"/g,'\\"')}"`;
+  if (filter === 'squote')     return `'${String(val).replace(/'/g,"\\'")}'`;
+  if (filter === 'unquote')    return String(val).replace(/^["']|["']$/g,'');
+  if (filter === 'toString' || filter === 'toStrings') return String(val);
+  if (filter === 'nospace')    return String(val).replace(/\s+/g,'');
+  if (filter === 'camelcase' || filter === 'camelCase')
+    return String(val).replace(/[-_\s]+(.)?/g,(_,c)=>c?c.toUpperCase():'');
+  if (filter === 'kebabcase' || filter === 'kebabCase' || filter === 'kebab')
+    return String(val).replace(/([A-Z])/g,'-$1').replace(/[\s_]+/g,'-').toLowerCase().replace(/^-/,'');
+  if (filter === 'snakecase' || filter === 'snakeCase')
+    return String(val).replace(/([A-Z])/g,'_$1').replace(/[\s-]+/g,'_').toLowerCase().replace(/^_/,'');
+
+  // indent / nindent
+  if (/^indent\s+\d+$/.test(filter)) {
+    const n = parseInt(filter.split(/\s+/)[1]);
+    const pad = ' '.repeat(n);
+    return String(val).split('\n').map((l,i) => i===0 ? l : pad+l).join('\n');
+  }
+  if (/^nindent\s+\d+$/.test(filter)) {
+    const n = parseInt(filter.split(/\s+/)[1]);
+    return '\n' + String(val).split('\n').map(l => ' '.repeat(n)+l).join('\n');
+  }
+
+  // Serialisation
+  if (filter === 'toYaml')        return jsToYaml(val, 0);
+  if (filter === 'toJson')        { try { return JSON.stringify(val); }        catch { return '{}'; } }
+  if (filter === 'toPrettyJson')  { try { return JSON.stringify(val,null,2); } catch { return '{}'; } }
+  if (filter === 'fromJson')      { try { return JSON.parse(String(val)); }    catch { return UNDEF; } }
+  if (filter === 'b64enc')        { try { return btoa(String(val)); }  catch { return String(val); } }
+  if (filter === 'b64dec')        { try { return atob(String(val)); }  catch { return String(val); } }
+  if (filter === 'sha256sum')     return '[sha256:' + String(val).length + ']';
+  if (filter === 'sha1sum')       return '[sha1:'   + String(val).length + ']';
+
+  // Type
+  if (filter === 'int' || filter === 'int64' || filter === 'float64' || filter === 'atoi') return toNum(val);
+  if (filter === 'typeOf' || filter === 'kindOf')
+    return val === null ? 'null' : Array.isArray(val) ? 'slice' : typeof val === 'object' ? 'map' : typeof val;
+  if (filter === 'len' || filter === 'length') {
+    if (typeof val === 'string' || Array.isArray(val)) return val.length;
+    if (typeof val === 'object' && val !== null) return Object.keys(val).length;
+    return 0;
+  }
+
+  // List
+  if (filter === 'first')     return Array.isArray(val) && val.length ? val[0] : UNDEF;
+  if (filter === 'last')      return Array.isArray(val) && val.length ? val[val.length-1] : UNDEF;
+  if (filter === 'rest')      return Array.isArray(val) ? val.slice(1) : [];
+  if (filter === 'initial')   return Array.isArray(val) ? val.slice(0,-1) : [];
+  if (filter === 'reverse')   return Array.isArray(val) ? [...val].reverse() : val;
+  if (filter === 'uniq')      return Array.isArray(val) ? [...new Set(val)] : val;
+  if (filter === 'compact')   return Array.isArray(val) ? val.filter(v => isTruthy(v)) : val;
+  if (filter === 'keys')      return typeof val === 'object' && val !== null ? Object.keys(val)   : [];
+  if (filter === 'values')    return typeof val === 'object' && val !== null ? Object.values(val) : [];
+  if (filter === 'sortAlpha') return Array.isArray(val) ? [...val].sort((a,b)=>String(a).localeCompare(String(b))) : val;
+
+  // Parameterised pipe filters
+  { const trimAllPipe = filter.match(/^trimAll\s+(.+)$/);
+    if (trimAllPipe) { const esc = String(evalStage(trimAllPipe[1],ctx)).replace(/[-\]\\^]/g,'\\$&'); return String(val).replace(new RegExp(`^[${esc}]+|[${esc}]+$`,'g'),''); }
+  }
+  { const repPipe = filter.match(/^replace\s+(.+)$/);
+    if (repPipe) { const args = tokeniseArgs(repPipe[1]); if (args.length===2) return String(val).split(String(evalStage(args[0],ctx))).join(String(evalStage(args[1],ctx))); }
+  }
+  { const repNPipe = filter.match(/^repeat\s+(\d+)$/);
+    if (repNPipe) return String(val).repeat(Math.max(0,parseInt(repNPipe[1])));
+  }
+  { const truncPipe = filter.match(/^trunc\s+(-?\d+)$/);
+    if (truncPipe) { const n = parseInt(truncPipe[1]); const s = String(val); return n < 0 ? s.slice(n) : s.slice(0,n); }
+  }
+  { const abbrevPipe = filter.match(/^abbrev\s+(\d+)$/);
+    if (abbrevPipe) { const n = parseInt(abbrevPipe[1]), s = String(val); return s.length > n ? s.slice(0,n-3)+'...' : s; }
+  }
+  { const contP = filter.match(/^contains\s+(.+)$/);
+    if (contP) return String(val).includes(String(evalStage(contP[1],ctx)));
+  }
+  { const hpP = filter.match(/^hasPrefix\s+(.+)$/);
+    if (hpP) return String(val).startsWith(String(evalStage(hpP[1],ctx)));
+  }
+  { const hsP = filter.match(/^hasSuffix\s+(.+)$/);
+    if (hsP) return String(val).endsWith(String(evalStage(hsP[1],ctx)));
+  }
+
   return val;
 }
 
-function evalExpr(raw, vals) {
-  const stages = splitPipes(raw);
-  let val = evalStage(stages[0], vals);
-  for (let i = 1; i < stages.length; i++) val = applyFilter(stages[i], val, vals);
+/* ── evalExprCtx ─────────────────────────────────────────────────────────── */
+function evalExprCtx(raw, ctx) {
+  const stages = splitPipes(raw.trim());
+  let val = evalStage(stages[0], ctx);
+  for (let i = 1; i < stages.length; i++) val = applyFilter(stages[i], val, ctx);
   return val;
 }
 
-/* ── Verify ─────────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   TEMPLATE ENGINE  — tokenise → parse → execute
+   ══════════════════════════════════════════════════════════════════════════ */
+function tokeniseTemplate(src) {
+  const tokens = [];
+  const re = /(\{\{-?)([\s\S]*?)(-?\}\})/g;
+  let last = 0, m;
+  while ((m = re.exec(src)) !== null) {
+    if (m.index > last) tokens.push({ type: 'text', value: src.slice(last, m.index) });
+    tokens.push({ type: 'action', inner: m[2].trim(), trimLeft: m[1].endsWith('-'), trimRight: m[3].startsWith('-'), raw: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) tokens.push({ type: 'text', value: src.slice(last) });
+  return tokens;
+}
+
+function parseNodes(tokens, pos) {
+  const nodes = [];
+  while (pos < tokens.length) {
+    const tok = tokens[pos];
+
+    if (tok.type === 'text') {
+      nodes.push({ type: 'text', value: tok.value });
+      pos++;
+      continue;
+    }
+
+    const inner = tok.inner;
+    if (/^end$/.test(inner) || /^else(\s|$)/.test(inner)) break;
+
+    // Comment
+    if (/^\/\*[\s\S]*\*\/$/.test(inner) || inner.startsWith('/*')) {
+      nodes.push({ type: 'comment', trimLeft: tok.trimLeft, trimRight: tok.trimRight });
+      pos++;
+      continue;
+    }
+
+    // if
+    if (/^if(\s|$)/.test(inner)) {
+      const condExpr = inner.replace(/^if\s*/, '');
+      pos++;
+      const r1 = parseNodes(tokens, pos); pos = r1.pos;
+      const elseChains = [];
+      while (pos < tokens.length && tokens[pos].type === 'action' && /^else(\s|$)/.test(tokens[pos].inner)) {
+        const elTok = tokens[pos];
+        if (/^else\s+if\s/.test(elTok.inner)) {
+          const ec = elTok.inner.replace(/^else\s+if\s*/, '');
+          pos++;
+          const r2 = parseNodes(tokens, pos); pos = r2.pos;
+          elseChains.push({ type: 'elseif', cond: ec, nodes: r2.nodes });
+        } else {
+          pos++;
+          const r3 = parseNodes(tokens, pos); pos = r3.pos;
+          elseChains.push({ type: 'else', nodes: r3.nodes });
+          break;
+        }
+      }
+      if (pos < tokens.length && tokens[pos].type === 'action' && /^end$/.test(tokens[pos].inner)) pos++;
+      nodes.push({ type: 'if', cond: condExpr, thenNodes: r1.nodes, elseChains, trimLeft: tok.trimLeft, trimRight: tok.trimRight });
+      continue;
+    }
+
+    // range
+    if (/^range(\s|$)/.test(inner)) {
+      const rangeExpr = inner.replace(/^range\s*/, '');
+      pos++;
+      const rb = parseNodes(tokens, pos); pos = rb.pos;
+      let elseNodes = null;
+      if (pos < tokens.length && tokens[pos].type === 'action' && /^else$/.test(tokens[pos].inner)) {
+        pos++;
+        const re2 = parseNodes(tokens, pos); pos = re2.pos;
+        elseNodes = re2.nodes;
+      }
+      if (pos < tokens.length && tokens[pos].type === 'action' && /^end$/.test(tokens[pos].inner)) pos++;
+      nodes.push({ type: 'range', expr: rangeExpr, bodyNodes: rb.nodes, elseNodes, trimLeft: tok.trimLeft, trimRight: tok.trimRight });
+      continue;
+    }
+
+    // with
+    if (/^with\s/.test(inner)) {
+      const withExpr = inner.replace(/^with\s*/, '');
+      pos++;
+      const wb = parseNodes(tokens, pos); pos = wb.pos;
+      let elseNodes = null;
+      if (pos < tokens.length && tokens[pos].type === 'action' && /^else$/.test(tokens[pos].inner)) {
+        pos++;
+        const we = parseNodes(tokens, pos); pos = we.pos;
+        elseNodes = we.nodes;
+      }
+      if (pos < tokens.length && tokens[pos].type === 'action' && /^end$/.test(tokens[pos].inner)) pos++;
+      nodes.push({ type: 'with', expr: withExpr, bodyNodes: wb.nodes, elseNodes, trimLeft: tok.trimLeft, trimRight: tok.trimRight });
+      continue;
+    }
+
+    // define
+    if (/^define\s/.test(inner)) {
+      const nm = inner.match(/^define\s+["'](.+?)["']$/);
+      const defName = nm ? nm[1] : inner.replace(/^define\s+/, '');
+      pos++;
+      const db = parseNodes(tokens, pos); pos = db.pos;
+      if (pos < tokens.length && tokens[pos].type === 'action' && /^end$/.test(tokens[pos].inner)) pos++;
+      nodes.push({ type: 'define', name: defName, defNodes: db.nodes });
+      continue;
+    }
+
+    // variable assignment
+    const assignM = inner.match(/^(\$[A-Za-z_][A-Za-z0-9_]*)\s*:=\s*(.+)$/);
+    if (assignM) {
+      nodes.push({ type: 'assign', varName: assignM[1].slice(1), expr: assignM[2].trim(), trimLeft: tok.trimLeft, trimRight: tok.trimRight });
+      pos++;
+      continue;
+    }
+
+    // plain expression
+    nodes.push({ type: 'expr', expr: inner, trimLeft: tok.trimLeft, trimRight: tok.trimRight });
+    pos++;
+  }
+  return { nodes, pos };
+}
+
+function execNodes(nodes, ctx) {
+  let out = '';
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const next = nodes[i + 1];
+    let piece = '';
+
+    switch (node.type) {
+      case 'text': {
+        piece = node.value;
+        break;
+      }
+      case 'comment': piece = ''; break;
+      case 'assign': {
+        const v = evalExprCtx(node.expr, ctx);
+        ctx.vars[node.varName] = v === UNDEF ? null : v;
+        piece = '';
+        break;
+      }
+      case 'expr': {
+        const v = evalExprCtx(node.expr, ctx);
+        piece = (v === UNDEF || v === null || v === undefined) ? '' : String(v);
+        break;
+      }
+      case 'if': {
+        if (isTruthy(evalExprCtx(node.cond, ctx))) {
+          piece = execNodes(node.thenNodes, ctx);
+        } else {
+          let handled = false;
+          for (const chain of node.elseChains) {
+            if (chain.type === 'elseif') {
+              if (isTruthy(evalExprCtx(chain.cond, ctx))) { piece = execNodes(chain.nodes, ctx); handled = true; break; }
+            } else {
+              piece = execNodes(chain.nodes, ctx); handled = true; break;
+            }
+          }
+          if (!handled) piece = '';
+        }
+        break;
+      }
+      case 'range': {
+        const rExpr = node.expr;
+        let collection = null, keyVar = null, valVar = null;
+        const kvM = rExpr.match(/^(\$[A-Za-z_][A-Za-z0-9_]*)\s*,\s*(\$[A-Za-z_][A-Za-z0-9_]*)\s*:=\s*(.+)$/);
+        if (kvM) {
+          keyVar = kvM[1].slice(1); valVar = kvM[2].slice(1);
+          collection = evalExprCtx(kvM[3].trim(), ctx);
+        } else {
+          const vM = rExpr.match(/^(\$[A-Za-z_][A-Za-z0-9_]*)\s*:=\s*(.+)$/);
+          if (vM) { valVar = vM[1].slice(1); collection = evalExprCtx(vM[2].trim(), ctx); }
+          else      collection = evalExprCtx(rExpr, ctx);
+        }
+
+        if (collection === UNDEF || collection === null || collection === undefined) {
+          piece = node.elseNodes ? execNodes(node.elseNodes, ctx) : ''; break;
+        }
+
+        let iterations = [];
+        if (Array.isArray(collection)) {
+          iterations = collection.map((v, k) => ({ key: k, val: v }));
+        } else if (typeof collection === 'object') {
+          iterations = Object.entries(collection).map(([k, v]) => ({ key: k, val: v }));
+        } else {
+          const n = toNum(collection);
+          iterations = Array.from({ length: n }, (_, i) => ({ key: i, val: i }));
+        }
+
+        if (!iterations.length) { piece = node.elseNodes ? execNodes(node.elseNodes, ctx) : ''; break; }
+
+        let rangeOut = '';
+        for (const { key, val } of iterations) {
+          const cv = { ...ctx.vars };
+          if (keyVar) cv[keyVar] = key;
+          if (valVar) cv[valVar] = val;
+          rangeOut += execNodes(node.bodyNodes, { vals: ctx.vals, dot: val, vars: cv });
+        }
+        piece = rangeOut;
+        break;
+      }
+      case 'with': {
+        const wv = evalExprCtx(node.expr, ctx);
+        if (isTruthy(wv)) {
+          piece = execNodes(node.bodyNodes, { vals: ctx.vals, dot: wv === UNDEF ? ctx.dot : wv, vars: { ...ctx.vars } });
+        } else {
+          piece = node.elseNodes ? execNodes(node.elseNodes, ctx) : '';
+        }
+        break;
+      }
+      case 'define': piece = ''; break;
+      default: piece = '';
+    }
+
+    // Whitespace trimming
+    if (node.trimLeft)  out   = out.trimEnd();
+    if (node.trimRight) piece = piece.replace(/^[ \t]*\n?/, '');
+    if (node.type !== 'text' && node.trimRight && next && next.type === 'text') {
+      next.value = next.value.replace(/^[ \t]*\n?/, '');
+    }
+
+    out += piece;
+  }
+  return out;
+}
+
+function renderHelm(template, vals) {
+  const tokens    = tokeniseTemplate(template);
+  const { nodes } = parseNodes(tokens, 0);
+  return execNodes(nodes, { vals, dot: vals, vars: {} });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   VERIFY
+   ══════════════════════════════════════════════════════════════════════════ */
 function extractValuePaths(inner) {
   const paths = [];
   const re = /\.Values\.([A-Za-z0-9_.]+)/g;
@@ -1244,24 +2099,23 @@ function verifyInputs() {
   const template = templateEditor.value;
   const values   = valuesEditor.value;
 
-  if (!template.trim()) errors.push('Template.yaml is empty.');
+  if (!template.trim()) errors.push('Template is empty.');
   if (!values.trim())   errors.push('Values.yaml is empty.');
 
   const openCount  = (template.match(/\{\{/g)  || []).length;
-  const closeCount = (template.match(/\}\}/g) || []).length;
-  if (openCount !== closeCount) errors.push('Unclosed template expression detected.');
+  const closeCount = (template.match(/\}\}/g)  || []).length;
+  if (openCount !== closeCount)
+    errors.push(`Unbalanced template delimiters: ${openCount} opening {{ vs ${closeCount} closing }}.`);
 
-  const cfPatterns = [
-    [/\{\{-?\s*include\b/i, 'include'],
-    [/\{\{-?\s*range\b/i,   'range'],
-    [/\{\{-?\s*if\b/i,      'if'],
-    [/\{\{-?\s*tpl\b/i,     'tpl'],
-    [/\{\{-?\s*printf\b/i,  'printf'],
-  ];
-  cfPatterns.forEach(([re, name]) => {
-    if (re.test(template))
-      warnings.push(`Unsupported Helm expression: {{ ${name} … }} — will not be rendered.`);
-  });
+  const blockOpeners = (template.match(/\{\{-?\s*(?!else\s)(if|range|with|define)\b/g) || []).length;
+  const blockEnds    = (template.match(/\{\{-?\s*end\s*-?\}\}/g)             || []).length;
+  if (blockOpeners !== blockEnds)
+    errors.push(`Block mismatch: ${blockOpeners} opening block(s) (if/range/with/define) but ${blockEnds} {{ end }} found.`);
+
+  if (/\{\{-?\s*tpl\b/i.test(template))
+    warnings.push('{{ tpl … }} is not fully evaluated — dynamic template rendering is not supported.');
+  if (/\{\{-?\s*(include|template)\s/i.test(template))
+    warnings.push('{{ include/template … }} — named template calls are stubbed and will output [include] or [template].');
 
   let valuesObj = null;
   try { if (values.trim()) valuesObj = parseYAML(values); }
@@ -1273,8 +2127,10 @@ function verifyInputs() {
     const warned = new Set();
     while ((m = expRe.exec(template)) !== null) {
       const inner = m[1].trim();
-      if (/^(end|else|-)$/.test(inner)) continue;
-      if (/^\.(Files|Capabilities|Template)/.test(inner)) continue;
+      if (/^(end|else|define|range|with|if)\b/.test(inner)) continue;
+      if (/^\/\*/.test(inner)) continue;
+      if (/^\.(Files|Capabilities|Template|Release|Chart)\b/.test(inner)) continue;
+      if (/^\$[A-Za-z_].*:=/.test(inner)) continue;
       extractValuePaths(inner).forEach(path => {
         if (!warned.has(path)) {
           const topKey = path.split('.')[0];
@@ -1294,48 +2150,68 @@ function verifyInputs() {
   return errors.length === 0;
 }
 
-/* ── Render ─────────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   OUTPUT HIGHLIGHTER
+   ══════════════════════════════════════════════════════════════════════════ */
 function highlightOutputYAML(yaml) {
   return yaml.split('\n').map(line => {
     const esc = escapeHtml(line);
     if (/^\s*#/.test(line)) return `<span class="yaml-comment">${esc}</span>`;
-    if (/^\s*-\s/.test(line) && !line.includes(':')) {
-      return `<span class="yaml-string">${esc}</span>`;
-    }
+    if (/^\s*-\s/.test(line) && !line.includes(':')) return `<span class="yaml-string">${esc}</span>`;
+    // key: value (value preceded by space/tab)
     const m = line.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:([ \t].*)$/);
     if (m) {
       let v = escapeHtml(m[3]);
       v = v.replace(/\b(true|false|null)\b/g, '<span class="yaml-bool">$1</span>');
       v = v.replace(/(?<![{A-Za-z])(-?\d+(\.\d+)?)(?![}\w])/g, '<span class="yaml-number">$1</span>');
-      return `${escapeHtml(m[1])}<span class="yaml-key">${escapeHtml(m[2])}</span>:<span class="yaml-string">${v}</span>`;
+      return `${escapeHtml(m[1])}<span class="yaml-key">${escapeHtml(m[2])}</span><span class="yaml-colon">:</span><span class="yaml-string">${v}</span>`;
     }
+    // key: (parent mapping key with no inline value)
+    const mk = line.match(/^(\s*-?\s*)([^:#\s{}][^:{]*?)\s*:\s*$/);
+    if (mk) return `${escapeHtml(mk[1])}<span class="yaml-key">${escapeHtml(mk[2])}</span><span class="yaml-colon">:</span>`;
     return esc;
   }).join('\n');
 }
 
+
+function updateOutputLines() {
+  const text = output.innerText;
+  const count = text.trim() === '' ? 0 : text.split('\n').length;
+  outputLines.innerHTML = count ? Array.from({ length: count }, (_, i) => i + 1).join('<br>') : '—';
+  outputLines.scrollTop = output.scrollTop;
+}
+output.addEventListener('scroll', () => { outputLines.scrollTop = output.scrollTop; });
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER ENTRY POINT
+   ══════════════════════════════════════════════════════════════════════════ */
 function renderTemplate() {
-  verifyInputs();
-  if (errors.length) { output.innerHTML = ''; return; }
+  const ok = verifyInputs();
+  if (!ok) { output.innerHTML = ''; updateOutputLines(); return; }
 
   const template = templateEditor.value;
   let vals = {};
   try { vals = parseYAML(valuesEditor.value); } catch { return; }
 
-  const rendered = template.replace(/\{\{-?\s*([\s\S]*?)\s*-?\}\}/g, (match, raw) => {
-    const expr = raw.trim();
-    if (/^(end|else|\/\*|-\s*$)/.test(expr))        return match;
-    if (/^(range|if|else\s+if|with)\b/.test(expr))   return match;
-    if (/^(include|tpl|printf|define)\b/.test(expr)) return match;
-    const result = evalExpr(expr, vals);
-    return result !== undefined ? String(result) : match;
-  });
+  let rendered;
+  try {
+    rendered = renderHelm(template, vals);
+  } catch (e) {
+    const msg = 'Render error: ' + e.message;
+    errors.push(msg);
+    addMessage('error', msg);
+    setStatus();
+    output.innerHTML = ''; updateOutputLines();
+    return;
+  }
 
   output.innerHTML = highlightOutputYAML(rendered);
-  addMessage('success', 'Template rendered successfully.');
+  updateOutputLines();
   setStatus();
 }
 
-/* ── Button wiring ──────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   BUTTON WIRING
+   ══════════════════════════════════════════════════════════════════════════ */
 document.getElementById('renderBtn').addEventListener('click', renderTemplate);
 document.getElementById('verifyBtn').addEventListener('click', verifyInputs);
 
@@ -1343,13 +2219,14 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   templateEditor.value = '';
   valuesEditor.value   = '';
   output.innerHTML     = '';
+  updateOutputLines();
   clearMessages();
   updateLines(templateEditor, document.getElementById('templateLines'));
   updateLines(valuesEditor,   document.getElementById('valuesLines'));
   updateBackdrop(templateEditor, templateBackdrop);
   updateBackdrop(valuesEditor,   valuesBackdrop);
   statusBadge.className   = 'status valid';
-  statusBadge.textContent = 'VALID';
+  statusBadge.textContent = 'READY';
 });
 
 document.getElementById('copyBtn').addEventListener('click', async () => {
@@ -1367,7 +2244,7 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
   a.href     = URL.createObjectURL(blob);
   a.download = 'rendered-output.yaml';
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast('Download started');
 });
 </script>
